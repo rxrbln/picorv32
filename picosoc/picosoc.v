@@ -67,7 +67,10 @@ module picosoc (
 	input  flash_io0_di,
 	input  flash_io1_di,
 	input  flash_io2_di,
-	input  flash_io3_di
+	input  flash_io3_di,
+
+	output P1A1, P1A2, P1A3, P1A4, P1A7, P1A8, P1A9, P1A10,
+	output P1B1, P1B2, P1B3, P1B4, P1B7, P1B8, P1B9, P1B10,
 );
 	parameter [0:0] BARREL_SHIFTER = 1;
 	parameter [0:0] ENABLE_MULDIV = 1;
@@ -202,6 +205,14 @@ module picosoc (
 		.reg_dat_wait(simpleuart_reg_dat_wait)
 	);
 
+        // vga core
+        vga vga (
+		 .CLK	(clk),
+		 .RESET	(resetn),
+		 .P1A1(P1B1), .P1A2(P1A2), .P1A3(P1A3), .P1A4(P1A4), .P1A7(P1A7), .P1A8(P1A8), .P1A9(P1A9), .P1A10(P1A10),
+		 .P1B1(P1B1), .P1B2(P1B2), .P1B3(P1B3), .P1B4(P1B4), .P1B7(P1B7), .P1B8(P1B8), .P1B9(P1B9), .P1B10(P1B10)
+	);
+   
 	always @(posedge clk)
 		ram_ready <= mem_valid && !mem_ready && mem_addr < 4*MEM_WORDS;
 

@@ -23,3 +23,23 @@ set_io led5       26
 # Onboard LEDs
 set_io ledr_n     11
 set_io ledg_n     37
+
+# PMOD 1A
+set_io P1A1        4
+set_io P1A2        2
+set_io P1A3	  47
+set_io P1A4	  45
+set_io P1A7        3
+set_io P1A8	  48
+set_io P1A9	  46
+set_io P1A10	  44
+
+# PMOD 1B
+set_io P1B1       43
+set_io P1B2	  38
+set_io P1B3	  34
+set_io P1B4       31
+set_io P1B7       42
+set_io P1B8       36
+set_io P1B9       32
+set_io P1B10      28

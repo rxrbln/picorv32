@@ -2,6 +2,8 @@
 CROSS=riscv32-unknown-elf-
 CFLAGS=
 
+ADDV=dvi-12bit.v vga_core.v vga_timing.v
+
 # ---- iCE40 HX8K Breakout Board ----
 
 hx8ksim: hx8kdemo_tb.vvp hx8kdemo_fw.hex
@@ -56,10 +58,10 @@ icebsim: icebreaker_tb.vvp icebreaker_fw.hex
 icebsynsim: icebreaker_syn_tb.vvp icebreaker_fw.hex
 	vvp -N $< +firmware=icebreaker_fw.hex
 
-icebreaker.json: icebreaker.v ice40up5k_spram.v spimemio.v simpleuart.v picosoc.v ../picorv32.v
+icebreaker.json: icebreaker.v ice40up5k_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v
 	yosys -ql icebreaker.log -p 'synth_ice40 -top icebreaker -json icebreaker.json' $^
 
-icebreaker_tb.vvp: icebreaker_tb.v icebreaker.v ice40up5k_spram.v spimemio.v simpleuart.v picosoc.v ../picorv32.v spiflash.v
+icebreaker_tb.vvp: icebreaker_tb.v icebreaker.v ice40up5k_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
 	iverilog -s testbench -o $@ $^ `yosys-config --datdir/ice40/cells_sim.v`
 
 icebreaker_syn_tb.vvp: icebreaker_tb.v icebreaker_syn.v spiflash.v
@@ -104,7 +106,7 @@ spiflash_tb.vvp: spiflash.v spiflash_tb.v
 
 # ---- ASIC Synthesis Tests ----
 
-cmos.log: spimemio.v simpleuart.v picosoc.v ../picorv32.v
+cmos.log: spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v
 	yosys -l cmos.log -p 'synth -top picosoc; abc -g cmos2; opt -fast; stat' $^
 
 # ---- Clean ----
