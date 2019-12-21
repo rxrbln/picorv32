@@ -24,25 +24,25 @@
  */
 
 module vga(
-    input CLK,
-	   
-    output P1A1,
-    output P1A2,
-    output P1A3,
-    output P1A4,
-    output P1A7,
-    output P1A8,
-    output P1A9,
-    output P1A10,
+   input CLK,
 
-    output P1B1,
-    output P1B2,
-    output P1B3,
-    output P1B4,
-    output P1B7,
-    output P1B8,
-    output P1B9,
-    output P1B10,
+   output P1A1,
+   output P1A2,
+   output P1A3,
+   output P1A4,
+   output P1A7,
+   output P1A8,
+   output P1A9,
+   output P1A10,
+
+   output P1B1,
+   output P1B2,
+   output P1B3,
+   output P1B4,
+   output P1B7,
+   output P1B8,
+   output P1B9,
+   output P1B10,
 );
 
    ////////////////////////////
