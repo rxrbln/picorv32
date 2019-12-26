@@ -53,24 +53,15 @@ module icebreaker (
 	reg [5:0] reset_cnt = 0;
 	wire resetn = &reset_cnt;
 
-   // global buffer clk for use w/ PLL
-   wire      clk2;
-   /*
-   SB_GB_IO #(
-       //.PIN_TYPE(6'b010001)
-   ) clk2_buf (
-      .PACKAGE_PIN(clk),
-      .GLOBAL_BUFFER_OUTPUT(clk2)
-   );
-   */
-
    /* icepll -o 25.175
     F_PLLIN:    12.000 MHz (given)
     F_PLLOUT:   25.175 MHz (requested)
     F_PLLOUT:   25.125 MHz (achieved)
     */
    wire    pixclk;
-   SB_PLL40_PAD #(
+   wire    clk2;
+   
+   SB_PLL40_2_PAD #(
       .FEEDBACK_PATH("SIMPLE"),
       .DIVR(4'd0),
       .DIVF(7'd68),
@@ -80,8 +71,8 @@ module icebreaker (
       .RESETB(1'b1),
       .BYPASS(1'b0),
       .PACKAGEPIN(clk),
-      .PLLOUTCORE(pixclk),
-      .PLLOUTGLOBAL(clk2)
+      .PLLOUTCOREA(clk2),
+      .PLLOUTCOREB(pixclk),
    );
 
    
