@@ -38,6 +38,9 @@ module icebreaker (
 	output ledr_n,
 	output ledg_n,
 
+	output P1A1, P1A2, P1A3, P1A4, P1A7, P1A8, P1A9, P1A10,
+	output P1B1, P1B2, P1B3, P1B4, P1B7, P1B8, P1B9, P1B10,
+	
 	output flash_csb,
 	output flash_clk,
 	inout  flash_io0,
@@ -50,7 +53,39 @@ module icebreaker (
 	reg [5:0] reset_cnt = 0;
 	wire resetn = &reset_cnt;
 
-	always @(posedge clk) begin
+   // global buffer clk for use w/ PLL
+   wire      clk2;
+   /*
+   SB_GB_IO #(
+       //.PIN_TYPE(6'b010001)
+   ) clk2_buf (
+      .PACKAGE_PIN(clk),
+      .GLOBAL_BUFFER_OUTPUT(clk2)
+   );
+   */
+
+   /* icepll -o 25.175
+    F_PLLIN:    12.000 MHz (given)
+    F_PLLOUT:   25.175 MHz (requested)
+    F_PLLOUT:   25.125 MHz (achieved)
+    */
+   wire    pixclk;
+   SB_PLL40_PAD #(
+      .FEEDBACK_PATH("SIMPLE"),
+      .DIVR(4'd0),
+      .DIVF(7'd68),
+      .DIVQ(3'd5),
+      .FILTER_RANGE(3'd1)
+   ) pll (
+      .RESETB(1'b1),
+      .BYPASS(1'b0),
+      .PACKAGEPIN(clk),
+      .PLLOUTCORE(pixclk),
+      .PLLOUTGLOBAL(clk2)
+   );
+
+   
+	always @(posedge clk2) begin
 		reset_cnt <= reset_cnt + !resetn;
 	end
 
@@ -87,10 +122,29 @@ module icebreaker (
 	wire [31:0] iomem_wdata;
 	reg  [31:0] iomem_rdata;
 
+        // vga core
+        vga vga (
+		 .clk(clk),
+		 .resetn(resetn),
+		 .pixclk(pixclk),
+		 .P1A1(P1A1), .P1A2(P1A2), .P1A3(P1A3), .P1A4(P1A4), .P1A7(P1A7), .P1A8(P1A8), .P1A9(P1A9), .P1A10(P1A10),
+		 .P1B1(P1B1), .P1B2(P1B2), .P1B3(P1B3), .P1B4(P1B4), .P1B7(P1B7), .P1B8(P1B8), .P1B9(P1B9), .P1B10(P1B10)
+
+		 /*
+		.iomem_valid  (iomem_valid ),
+		.iomem_ready  (iomem_ready ),
+		.iomem_wstrb  (iomem_wstrb ),
+		.iomem_addr   (iomem_addr  ),
+		.iomem_wdata  (iomem_wdata ),
+		.iomem_rdata  (iomem_rdata )
+		  */
+
+	);
+
 	reg [31:0] gpio;
 	assign leds = gpio;
 
-	always @(posedge clk) begin
+	always @(posedge clk2) begin
 		if (!resetn) begin
 			gpio <= 0;
 		end else begin
@@ -111,7 +165,7 @@ module icebreaker (
 		.ENABLE_MULDIV(0),
 		.MEM_WORDS(MEM_WORDS)
 	) soc (
-		.clk          (clk         ),
+		.clk          (clk2        ),
 		.resetn       (resetn      ),
 
 		.ser_tx       (ser_tx      ),

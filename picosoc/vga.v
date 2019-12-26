@@ -24,8 +24,17 @@
  */
 
 module vga(
-   input CLK,
+   input clk,
+   input resetn,
+   input pixclk,
 
+/* input        iomem_valid,
+   output        iomem_ready,
+   input [ 3:0] iomem_wstrb,
+   input [31:0] iomem_addr,
+   input [31:0] iomem_wdata,
+   output  [31:0] iomem_rdata, */
+	   
    output P1A1,
    output P1A2,
    output P1A3,
@@ -68,25 +77,7 @@ module vga(
    
    ////////////////////////////
    // clocking
-   
-   /* icepll -o 25.175
-    F_PLLIN:    12.000 MHz (given)
-    F_PLLOUT:   25.175 MHz (requested)
-    F_PLLOUT:   25.125 MHz (achieved)
-    */
-   wire    pixclk;
-   SB_PLL40_PAD #(
-      .FEEDBACK_PATH("SIMPLE"),
-      .DIVR(4'd0),
-      .DIVF(7'd68),
-      .DIVQ(3'd5),
-      .FILTER_RANGE(3'd1)
-   ) pll (
-      .RESETB(1'b1),
-      .BYPASS(1'b0),
-      .PACKAGEPIN(CLK),
-      .PLLOUTCORE(pixclk)
-   );
+
 
    // DDR output buffer to repeat pixel clock
    wire    vid_clk;
@@ -110,7 +101,7 @@ module vga(
    wire    hsync;
    wire    vsync;
    wire    data_en;
-
+   
    video_timing video_timing_inst (
       .clk(pixclk),
       .hsync(hsync),
@@ -127,11 +118,6 @@ module vga(
    reg 	     vid_hs;
    reg 	     vid_vs;
    reg 	     vid_de;
-
-   wire [23:0] vid_rgb;
-   assign vid_rgb[23:16] = vid_b;
-   assign vid_rgb[15:8] = vid_g;
-   assign vid_rgb[7:0] = vid_r;
    
    reg [8:0]   frame = 0;
    reg [15:0]  xpos = 0;
@@ -412,17 +398,17 @@ module vga(
 	    cursp1 <= curs_row[15:0] >> (16 - cursix);
 	    if (cursp0) begin
 	       if (cursp1)
-		 vid_rgb <= curspal1;
+		 {vid_r, vid_g, vid_b} <= curspal1;
 	       else
-		 vid_rgb <= curspal0;
+		 {vid_r, vid_g, vid_b} <= curspal0;
 	    end else begin
 	       if (cursp1) // invert / "highlight"
-		 vid_rgb <= ~fb_rgb; //{8'hff - fb_rgb[23:16], 8'hff - fb_rgb[15:8], 8'hff - fb_rgb[7:0]}
+		 {vid_r, vid_g, vid_b} <= ~fb_rgb; //{8'hff - fb_rgb[23:16], 8'hff - fb_rgb[15:8], 8'hff - fb_rgb[7:0]}
 	       else
-		 vid_rgb <= fb_rgb;
+		 {vid_r, vid_g, vid_b} <= fb_rgb;
 	    end
 	 end else begin
-	    vid_rgb <= fb_rgb;
+	    {vid_r, vid_g, vid_b} <= fb_rgb;
 	 end
 	 
       end else begin 
@@ -443,5 +429,21 @@ module vga(
       vid_vs <= vsync_prev;
       vid_de <= data_en;
    end
-   
+
+   /*
+   // system bus memoy access decode
+   always @(posedge clk) begin
+      if (resetn) begin
+	 //iomem_ready <= 0;
+	 if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 08) begin
+	    iomem_ready <= 1;
+	    iomem_rdata <= gpio;
+	    if (iomem_wstrb[0]) gpio[ 7: 0] <= iomem_wdata[ 7: 0];
+	    if (iomem_wstrb[1]) gpio[15: 8] <= iomem_wdata[15: 8];
+	    if (iomem_wstrb[2]) gpio[23:16] <= iomem_wdata[23:16];
+	    if (iomem_wstrb[3]) gpio[31:24] <= iomem_wdata[31:24];
+	 end
+      end
+   end
+   */
 endmodule
