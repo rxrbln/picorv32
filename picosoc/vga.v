@@ -1,7 +1,7 @@
 /*
  *  VGA - A simple Video Graphic Array
  *
- *  Copyright (C) 2019 René Rebe <rene@exactcode.de>
+ *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
@@ -140,12 +140,11 @@ module vga(
    // ReneR video core
    
    reg [7:0]   font[0:8*1024-1]; // 8k font / 2nd half fb
-   //initial $readmemh("charset.hex", font, 0);
+   initial $readmemh("charset.hex", font, 0);
    // initial font[0] = 8'b00000000; initial font[1] = 8'b11111000;
    // ...
    
    reg [15:0]  vram[0:4*1024-1]; // 8k text+attribute / frame buffer
-   /*
    initial vram[512+0] = "\001H";
    initial vram[512+1] = "\002E";
    initial vram[512+2] = "\003L";
@@ -220,10 +219,9 @@ module vga(
    initial vram[128*30 - 1] = "\141C";
    
    initial $readmemh("vram16.hex", vram);
-   */
    
    // text or graphic mode?
-   /*localparam*/ reg [0:0] textmode = 1;
+   /*localparam*/ reg textmode = 1;
    
    reg [7:0]   nchar;
    reg [7:0]   nattr;
@@ -239,7 +237,7 @@ module vga(
    reg [3:0]   col;
    reg [3:0]   fgcol;
    reg [3:0]   bgcol;
-   reg [0:0]   blink;
+   reg blink;
    
    reg [23:0]  pal0 = 24'h000000; // black
    reg [23:0]  pal1 = 24'h0000aa; // blue
@@ -288,8 +286,8 @@ module vga(
    
    reg [23:0]  curspal0 = 24'h000000; // cursor palette
    reg [23:0]  curspal1 = 24'hffffff;
-   reg [0:0]   cursp0;
-   reg [0:0]   cursp1;
+   reg cursp0;
+   reg cursp1;
    
    
    // ----------------------------------------------------------------------------
@@ -442,18 +440,35 @@ module vga(
    always @(posedge clk) begin
       if (resetn) begin
 	 vga_ready <= 0;
-	 vga_rdata <= {32'h0};
-	 if (sel && addr == 24'h0) begin
-	    vga_ready <= 1;
-	    vga_rdata = {16'h0, cursx};
-	    if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
-	    if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
-	 end else if (sel && addr == 24'h4) begin
-	    vga_ready <= 1;
-	    vga_rdata = {16'h0, cursy};
-	    if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
-	    if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
-	 end else if (sel) begin
+	 if (sel) begin
+	    case (addr)
+	      24'h0:
+		begin
+		   vga_rdata <= {16'h0, cursx};
+		   if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
+		   if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
+		end
+	      24'h4:
+		begin
+		   vga_rdata <= {16'h0, cursy};
+		   if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
+		   if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
+		end
+	      24'h8:
+		begin
+		   vga_rdata <= {8'h0, curspal0};
+		   if (wstrb[0]) curspal0[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) curspal0[15: 8] <= wdata[15: 8];
+		   if (wstrb[1]) curspal0[23:16] <= wdata[23:16];
+		end
+	      24'hc:
+		begin
+		   vga_rdata <= {8'h0, curspal1};
+		   if (wstrb[0]) curspal1[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) curspal1[15: 8] <= wdata[15: 8];
+		   if (wstrb[1]) curspal1[23:16] <= wdata[23:16];
+		end
+	    endcase
 	    vga_ready <= 1;
 	 end
       end
