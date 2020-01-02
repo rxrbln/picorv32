@@ -766,14 +766,20 @@ void main()
 				break;
 			case 'c':
 			case 'C':
-			        cursor += cmd == 'c' ? 4 : -4;
-			        print("Cursor: ");
-				print_dec(vga_mmio[0]);
-			        print(", ");
-				print_dec(vga_mmio[1]);
-				print("\n");
-				vga_mmio[0] = cursor;
-				vga_mmio[1] = cursor;
+			        {
+				  cursor += cmd == 'c' ? 4 : -4;
+				  print("Cursor: ");
+				  print_dec(vga_mmio[0]);
+				  print(", ");
+				  print_dec(vga_mmio[1]);
+				  print("\n");
+				  vga_mmio[0] = cursor;
+				  vga_mmio[1] = cursor;
+				  uint32_t cycles;
+				  __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				  vga_mmio[2] = cycles;
+				  vga_mmio[3] = ~cycles;
+				}
 				break;
 			default:
 				continue;
