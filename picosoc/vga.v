@@ -27,14 +27,14 @@ module vga(
    input clk,
    input resetn,
    input pixclk,
-
-/* input        iomem_valid,
-   output        iomem_ready,
-   input [ 3:0] iomem_wstrb,
-   input [31:0] iomem_addr,
-   input [31:0] iomem_wdata,
-   output  [31:0] iomem_rdata, */
-	   
+   
+   input        sel,
+   output       ready,
+   input [ 3:0] wstrb,
+   input [23:0] addr,
+   input [31:0] wdata,
+   output [31:0] rdata,
+   
    output P1A1,
    output P1A2,
    output P1A3,
@@ -96,6 +96,13 @@ module vga(
    );
 
    ////////////////////////////
+   // mmio bus buffer interface
+   reg [31:0] vga_rdata;
+   reg 	      vga_ready;
+   assign ready = vga_ready;
+   assign rdata = vga_rdata;
+   
+   ////////////////////////////
    // video timing
    
    wire    hsync;
@@ -133,11 +140,12 @@ module vga(
    // ReneR video core
    
    reg [7:0]   font[0:8*1024-1]; // 8k font / 2nd half fb
-   initial $readmemh("charset.hex", font, 0);
+   //initial $readmemh("charset.hex", font, 0);
    // initial font[0] = 8'b00000000; initial font[1] = 8'b11111000;
    // ...
    
    reg [15:0]  vram[0:4*1024-1]; // 8k text+attribute / frame buffer
+   /*
    initial vram[512+0] = "\001H";
    initial vram[512+1] = "\002E";
    initial vram[512+2] = "\003L";
@@ -212,7 +220,7 @@ module vga(
    initial vram[128*30 - 1] = "\141C";
    
    initial $readmemh("vram16.hex", vram);
-   
+   */
    
    // text or graphic mode?
    /*localparam*/ reg [0:0] textmode = 1;
@@ -347,7 +355,7 @@ module vga(
 	    // graphic mode, "double scan" 320x240 => 640x480
 	    begin
 	       // 2x scale, 4 of 16 bits
-	       col <= vram[ipos[17:0] >> 4] >> (ipos[3:0] & 4'b1100);
+	       col <= 0; //vram[ipos[17:0] >> 4] >> (ipos[3:0] & 4'b1100);
 	    end
 	 end
 	 
@@ -430,20 +438,25 @@ module vga(
       vid_de <= data_en;
    end
 
-   /*
-   // system bus memoy access decode
+   // mmio system bus interface
    always @(posedge clk) begin
       if (resetn) begin
-	 //iomem_ready <= 0;
-	 if (iomem_valid && !iomem_ready && iomem_addr[31:24] == 8'h 08) begin
-	    iomem_ready <= 1;
-	    iomem_rdata <= gpio;
-	    if (iomem_wstrb[0]) gpio[ 7: 0] <= iomem_wdata[ 7: 0];
-	    if (iomem_wstrb[1]) gpio[15: 8] <= iomem_wdata[15: 8];
-	    if (iomem_wstrb[2]) gpio[23:16] <= iomem_wdata[23:16];
-	    if (iomem_wstrb[3]) gpio[31:24] <= iomem_wdata[31:24];
+	 vga_ready <= 0;
+	 vga_rdata <= {32'h0};
+	 if (sel && addr == 24'h0) begin
+	    vga_ready <= 1;
+	    vga_rdata = {16'h0, cursx};
+	    if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
+	    if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
+	 end else if (sel && addr == 24'h4) begin
+	    vga_ready <= 1;
+	    vga_rdata = {16'h0, cursy};
+	    if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
+	    if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
+	 end else if (sel) begin
+	    vga_ready <= 1;
 	 end
       end
    end
-   */
+
 endmodule

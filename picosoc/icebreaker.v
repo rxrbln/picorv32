@@ -113,23 +113,24 @@ module icebreaker (
 	wire [31:0] iomem_wdata;
 	reg  [31:0] iomem_rdata;
 
+   	reg vgamem_ready;
+   	wire vgamem_sel = iomem_valid && iomem_addr[31]; // high bit set
+	reg [31:0] vgamem_rdata;
+
         // vga core
         vga vga (
-		 .clk(clk),
+		 .clk(clk2),
 		 .resetn(resetn),
 		 .pixclk(pixclk),
 		 .P1A1(P1A1), .P1A2(P1A2), .P1A3(P1A3), .P1A4(P1A4), .P1A7(P1A7), .P1A8(P1A8), .P1A9(P1A9), .P1A10(P1A10),
-		 .P1B1(P1B1), .P1B2(P1B2), .P1B3(P1B3), .P1B4(P1B4), .P1B7(P1B7), .P1B8(P1B8), .P1B9(P1B9), .P1B10(P1B10)
+		 .P1B1(P1B1), .P1B2(P1B2), .P1B3(P1B3), .P1B4(P1B4), .P1B7(P1B7), .P1B8(P1B8), .P1B9(P1B9), .P1B10(P1B10),
 
-		 /*
-		.iomem_valid  (iomem_valid ),
-		.iomem_ready  (iomem_ready ),
-		.iomem_wstrb  (iomem_wstrb ),
-		.iomem_addr   (iomem_addr  ),
-		.iomem_wdata  (iomem_wdata ),
-		.iomem_rdata  (iomem_rdata )
-		  */
-
+		.sel    (vgamem_sel),
+		.ready  (vgamem_ready),
+		.wstrb  (iomem_wstrb),
+		.addr   (iomem_addr[23:0]),
+		.wdata  (iomem_wdata),
+		.rdata  (vgamem_rdata)
 	);
 
 	reg [31:0] gpio;
@@ -147,6 +148,9 @@ module icebreaker (
 				if (iomem_wstrb[1]) gpio[15: 8] <= iomem_wdata[15: 8];
 				if (iomem_wstrb[2]) gpio[23:16] <= iomem_wdata[23:16];
 				if (iomem_wstrb[3]) gpio[31:24] <= iomem_wdata[31:24];
+			end else if (vgamem_sel && !iomem_ready) begin
+			   iomem_ready <= vgamem_ready;
+			   iomem_rdata <= vgamem_rdata;
 			end
 		end
 	end

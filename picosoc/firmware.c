@@ -665,6 +665,9 @@ void cmd_echo()
 
 void main()
 {
+	volatile uint32_t* vga_mmio = (void*)0x80000000;
+	uint32_t cursor = 0;
+
 	reg_leds = 31;
 	reg_uart_clkdiv = 104;
 	print("Booting..\n");
@@ -711,6 +714,7 @@ void main()
 		print("   [0] Benchmark all configs\n");
 		print("   [M] Run Memtest\n");
 		print("   [S] Print SPI state\n");
+		print("   [c] Move VGA cursor\n");
 		print("   [e] Echo UART\n");
 		print("\n");
 
@@ -759,6 +763,17 @@ void main()
 				break;
 			case 'e':
 				cmd_echo();
+				break;
+			case 'c':
+			case 'C':
+			        cursor += cmd == 'c' ? 4 : -4;
+			        print("Cursor: ");
+				print_dec(vga_mmio[0]);
+			        print(", ");
+				print_dec(vga_mmio[1]);
+				print("\n");
+				vga_mmio[0] = cursor;
+				vga_mmio[1] = cursor;
 				break;
 			default:
 				continue;
