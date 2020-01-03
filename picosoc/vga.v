@@ -459,14 +459,14 @@ module vga(
 		   vga_rdata <= {8'h0, curspal0};
 		   if (wstrb[0]) curspal0[ 7: 0] <= wdata[ 7: 0];
 		   if (wstrb[1]) curspal0[15: 8] <= wdata[15: 8];
-		   if (wstrb[1]) curspal0[23:16] <= wdata[23:16];
+		   if (wstrb[2]) curspal0[23:16] <= wdata[23:16];
 		end
 	      24'hc:
 		begin
 		   vga_rdata <= {8'h0, curspal1};
 		   if (wstrb[0]) curspal1[ 7: 0] <= wdata[ 7: 0];
 		   if (wstrb[1]) curspal1[15: 8] <= wdata[15: 8];
-		   if (wstrb[1]) curspal1[23:16] <= wdata[23:16];
+		   if (wstrb[2]) curspal1[23:16] <= wdata[23:16];
 		end
 	    endcase
 	    vga_ready <= 1;
