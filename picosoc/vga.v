@@ -23,6 +23,22 @@
  * 640x480, 8x16 text + color attribute & palette.
  */
 
+// TODO: parameterize width, and size
+module dpram (
+   input clk, wen, ren,
+   input [11:0] waddr, raddr,
+   input [15:0] wdata,
+   output reg [15:0] rdata
+);
+   reg [15:0] mem [0:4096-1];
+   always @(posedge clk) begin
+      if (wen)
+        mem[waddr] <= wdata;
+      if (ren)
+        rdata <= mem[raddr];
+   end
+endmodule
+
 module vga(
    input clk,
    input resetn,
@@ -138,12 +154,48 @@ module vga(
    
    
    // ReneR video core
-   
+   /*
    reg [7:0]   font[0:8*1024-1]; // 8k font / 2nd half fb
    initial $readmemh("charset.hex", font, 0);
+    */
    // initial font[0] = 8'b00000000; initial font[1] = 8'b11111000;
    // ...
+
+   reg 	vramwen = 0;
+   reg 	vramren = 0;
+   wire [15:0] vramrdata;
+   reg [15:0] vramwdata;
+   reg [11:0] vramwaddr;
+   reg [11:0] vramraddr;
    
+   dpram nvram (
+      .clk(pixclk),
+      .ren(vramren),
+      .wen(vramwen),
+      .raddr(vramraddr),
+      .waddr(vramwaddr),
+      .rdata(vramrdata),
+      .wdata(vramwdata)
+    );
+
+   reg 	fontwen = 0;
+   reg 	fontren = 0;
+   wire [15:0] fontrdata;
+   reg [15:0] fontwdata;
+   reg [11:0] fontwaddr;
+   reg [11:0] fontraddr;
+   
+   dpram fontram (
+      .clk(pixccclk),
+      .ren(fontren),
+      .wen(fontwen),
+      .raddr(fontraddr),
+      .waddr(fontwaddr),
+      .rdata(fontrdata),
+      .wdata(fontwdata)
+    );
+
+   /*
    reg [15:0]  vram[0:4*1024-1]; // 8k text+attribute / frame buffer
    initial vram[512+0] = "\001H";
    initial vram[512+1] = "\002E";
@@ -219,14 +271,12 @@ module vga(
    initial vram[128*30 - 1] = "\141C";
    
    initial $readmemh("vram16.hex", vram);
-   
+   */
+    
    // text or graphic mode?
    /*localparam*/ reg textmode = 1;
    
-   reg [7:0]   nchar;
-   reg [7:0]   nattr;
-   
-   reg [7:0]   attr;
+   reg [7:0] attr;
    reg [7:0]   row;
    reg [7:0]   nrow;
    reg [7:0]   mask;
@@ -315,18 +365,27 @@ module vga(
 	       // load char index from vram, * 256 bytes, 128 "words"  per row
 	       // interleaved text color attribute
 	       taddr <= ((ypos & 16'hFFF0) << 3) | (data_en ? (xpos[10:3] + 1) : 0);
-	       nchar <= vram[taddr][7:0];
-	       nattr <= vram[taddr][15:8];
+	       
+	       vramren <= 1;
+	       vramraddr <= taddr;
+	       
+	       //nchar <= vram[taddr][7:0];
+	       //nattr <= vram[taddr][15:8];
 	    end
 	    
 	    if (!data_en || xpos[2:0] == 6) begin
-	       faddr <= (nchar << 4) | ypos[3:0];
-	       nrow <= font[faddr[11:0]]; // 8'b11111000) << 1) ypos[3:0])
+	       faddr <= (vramrdata[7:0] << 4) | ypos[3:0];
+	       fontren <= 1;
+	       fontraddr <= faddr[11:0];
+	    end
+	    if (!data_en || xpos[2:0] == 7) begin
+	       fontren <= 0;
+	       nrow <= fontrdata[7:0];
 	    end
 	    
 	    if (xpos[2:0] == 0) begin
 	       // transfer pre-loaded at begin of each pixel
-	       attr <= nattr;
+	       attr <= vramrdata[15:8];
 	       row <= nrow;
 	    end
 	    
@@ -436,40 +495,73 @@ module vga(
       vid_de <= data_en;
    end
 
+   
    // mmio system bus interface
    always @(posedge clk) begin
       if (resetn) begin
 	 vga_ready <= 0;
+	 vramwen <= 0;
+	 fontwen <= 0;
+	 //vramren <= 0;
+	 
 	 if (sel) begin
-	    case (addr)
-	      24'h0:
-		begin
-		   vga_rdata <= {16'h0, cursx};
-		   if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
-		   if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
-		end
-	      24'h4:
-		begin
-		   vga_rdata <= {16'h0, cursy};
-		   if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
-		   if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
-		end
-	      24'h8:
-		begin
-		   vga_rdata <= {8'h0, curspal0};
-		   if (wstrb[0]) curspal0[ 7: 0] <= wdata[ 7: 0];
-		   if (wstrb[1]) curspal0[15: 8] <= wdata[15: 8];
-		   if (wstrb[2]) curspal0[23:16] <= wdata[23:16];
-		end
-	      24'hc:
-		begin
-		   vga_rdata <= {8'h0, curspal1};
-		   if (wstrb[0]) curspal1[ 7: 0] <= wdata[ 7: 0];
-		   if (wstrb[1]) curspal1[15: 8] <= wdata[15: 8];
-		   if (wstrb[2]) curspal1[23:16] <= wdata[23:16];
-		end
-	    endcase
-	    vga_ready <= 1;
+	    // must be aligned 16 bit writes, ..!
+	    if (addr < 24'h400000) begin // VRAM
+	       if (wstrb[3:0] != 4'b0) begin
+		  vramwen <= 1;
+		  vramwaddr <= addr[13:2];
+		  if (wstrb[0]) vramwdata[ 7: 0] <= wdata[ 7: 0];
+		  if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
+	       end
+	       vga_ready <= 1;
+	       /* end else begin
+		if (!vramren) begin
+		vramren <= 1;
+		vramraddr <= addr[7:0];
+	       end else begin
+		vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
+		vga_ready <= 1;
+	       end
+	    end	*/
+	    end else if (addr < 24'h800000) begin // FONT
+	       if (wstrb[3:0] != 4'b0) begin
+		  fontwen <= 1;
+		  fontwaddr <= addr[13:2];
+		  if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7: 0];
+		  if (wstrb[1]) fontwdata[15: 8] <= wdata[15: 8];
+	       end
+	       vga_ready <= 1;
+	    end else begin
+	       vga_ready <= 1;
+	       case (addr)
+		 24'h800000:
+		   begin
+		      vga_rdata <= {16'h0, cursx};
+		      if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
+		      if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
+		   end
+		 24'h800004:
+		   begin
+		      vga_rdata <= {16'h0, cursy};
+		      if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
+		      if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
+		   end
+		 24'h800008:
+		   begin
+		      vga_rdata <= {8'h0, curspal0};
+		      if (wstrb[0]) curspal0[ 7: 0] <= wdata[ 7: 0];
+		      if (wstrb[1]) curspal0[15: 8] <= wdata[15: 8];
+		      if (wstrb[2]) curspal0[23:16] <= wdata[23:16];
+		   end
+		 24'h80000c:
+		   begin
+		      vga_rdata <= {8'h0, curspal1};
+		      if (wstrb[0]) curspal1[ 7: 0] <= wdata[ 7: 0];
+		      if (wstrb[1]) curspal1[15: 8] <= wdata[15: 8];
+		      if (wstrb[2]) curspal1[23:16] <= wdata[23:16];
+		   end
+	       endcase
+	    end
 	 end
       end
    end
