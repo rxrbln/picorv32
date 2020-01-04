@@ -663,18 +663,38 @@ void cmd_echo()
 
 // --------------------------------------------------------
 
+
+	uint32_t jit[] = {
+	  0x00400593,
+	  0x00b55533,
+	  0x00050533,
+	  0x00008067,
+	};
+
+
+const uint8_t charset[] = {
+};
+
+const char banner[80] = "Hello Pico RISCV32 SoC World! https://rene.rene.name ;-)";
+	  
 void main()
 {
-	volatile uint32_t* vga_mmio = (void*)0x80000000;
-	uint32_t cursor = 0;
+	uint32_t* vga_vram = (void*)0x80000000;
+	uint32_t* vga_font = (void*)0x80400000;
 
+	volatile uint32_t* vga_mmio = (void*)0x80800000;
+	uint32_t cursor = 0;
+	
 	reg_leds = 31;
 	reg_uart_clkdiv = 104;
 	print("Booting..\n");
 
 	reg_leds = 63;
 	set_flash_qspi_flag();
-
+	
+	for (int i = 0; i < sizeof(charset); ++i)
+	  vga_font[i] = charset[i];
+	
 	reg_leds = 127;
 	while (getchar_prompt("Press ENTER to continue..\n") != '\r') { /* wait */ }
 
@@ -728,6 +748,15 @@ void main()
 
 			switch (cmd)
 			{
+			case 'j':
+			        {
+				  print("jit> ");
+				  int (*x)(int a) = (int (*)(int a))jit;
+				  int i = x(0xc0febeed);
+				  print_hex(i, 8);
+				  print("\n");
+				}
+			        break;
 			case '1':
 				cmd_read_flash_id();
 				break;
@@ -766,19 +795,49 @@ void main()
 				break;
 			case 'c':
 			case 'C':
-			        {
-				  cursor += cmd == 'c' ? 4 : -4;
+			  {
+			    for (int y = 0; y < 30; ++y)
+			      for (int x = 0; x < 80; ++x)
+				vga_vram[y*128 + x] = cursor << 12;
+			    
+			    for (int y = cursor; y < cursor + 1; ++y) {
+			      for (int x = cursor, i = 0; x < 80 - cursor; ++x, ++i) {
+				uint8_t attr = ((y & 0xf) << 4) | (x & 0xf);
+				vga_vram[y*128 + x] = (attr << 8) | banner[i];
+			      }
+			    }
+			    
+#if 1
+				  cursor += cmd == 'c' ? 1 : -1;
 				  print("Cursor: ");
 				  print_dec(vga_mmio[0]);
 				  print(", ");
 				  print_dec(vga_mmio[1]);
 				  print("\n");
-				  vga_mmio[0] = cursor;
-				  vga_mmio[1] = cursor;
+				  vga_mmio[0] = cursor * 4;
+				  vga_mmio[1] = cursor * 4;
 				  uint32_t cycles;
 				  __asm__ volatile ("rdcycle %0" : "=r"(cycles));
 				  vga_mmio[2] = cycles;
 				  vga_mmio[3] = ~cycles;
+#else
+				  if (cmd == 'c') {
+				    print("VGA: ");
+				    print_hex(vga_vram[0], 8);
+				    print_hex(vga_vram[1], 8);
+				    print_hex(vga_vram[2], 8);
+				    print_hex(vga_vram[4], 8);
+				    print("\n");
+				  } else {
+				    uint32_t cycles;
+				    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				    vga_vram[0] = cycles;
+				    vga_vram[1] = cycles >> 16;
+				    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				    vga_vram[2] = cycles;
+				    vga_vram[3] = cycles >> 16;
+				  }
+#endif
 				}
 				break;
 			default:
