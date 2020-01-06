@@ -28,9 +28,12 @@ module dpram (
    input clk, wen, ren,
    input [11:0] waddr, raddr,
    input [15:0] wdata,
-   output reg [15:0] rdata
+   output reg [15:0] rdata,
 );
    reg [15:0] mem [0:4096-1];
+   
+   initial $readmemh("charset.hex", mem, 0);
+
    always @(posedge clk) begin
       if (wen)
         mem[waddr] <= wdata;
@@ -186,7 +189,7 @@ module vga(
    reg [11:0] fontraddr;
    
    dpram fontram (
-      .clk(pixccclk),
+      .clk(pixclk),
       .ren(fontren),
       .wen(fontwen),
       .raddr(fontraddr),
