@@ -249,12 +249,12 @@ int vsprintf(char* out, const char* format, va_list argp)
   char temp[23]; // temp. formating buffer
   uint8_t tempi = sizeof(temp);
   for (; *format; ++format) {
+    // TODO: >9 (single digit) format and precision!
+    // TODO: and support for all formats, ...
+    uint8_t precision = 0, width = 0, zeros = 0;
+    
     if (*format == '%') {
       ++format;
-      
-      // TODO: >9 (single digit) format and precision!
-      // TODO: and support for all formats, ...
-      uint8_t precision = 0, width = 0, zeros = 0;
       if (*format == '0') {
 	zeros = *format++;
       }
@@ -330,9 +330,14 @@ int vsprintf(char* out, const char* format, va_list argp)
     }
 
     continue;
-    
+  
   output:
     // copy to output buffer and implicitly reset tempi
+    if (width) {
+      const int w = sizeof(temp) - tempi;
+      for (int i = 0; i < width - w; ++i)
+	*out++ = zeros ? '0' : ' ';
+    }
     for (; tempi < sizeof(temp); ++tempi)
       *out++ = temp[tempi];
   }
@@ -743,9 +748,10 @@ void cmd_echo()
 
 
 const uint8_t charset[] = {
+  // custom charset, if you want any
 };
 
-const char banner[80] = "Hello Pico RISCV32 SoC World! https://rene.rene.name ;-)";
+const char banner[80] = "RX32 SoC, initializing. https://rene.rene.name ;-)";
 
 
 const uint32_t jit[] = {
@@ -883,7 +889,7 @@ void main()
 			    
 #if 1
 				  cursor += cmd == 'c' ? 1 : -1;
-				  printf("Cursor: %d, %d\n", vga_mmio[0], vga_mmio[1]);
+				  printf("Cursor: %04d, _%2d_\n", vga_mmio[0], vga_mmio[1]);
 				  vga_mmio[0] = cursor * 4;
 				  vga_mmio[1] = cursor * 4;
 				  uint32_t cycles;
