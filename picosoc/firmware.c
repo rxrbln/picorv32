@@ -180,7 +180,7 @@ int isdigit(int c) {
   return 0;
 }
 
-int __divsi3(int dividend, int divisor)
+unsigned __udivsi3(unsigned dividend, unsigned divisor)
 {
   // TODO: W = 32
   static const int W = 16; // maximum nuber of bits in the dividend & divisor
@@ -202,6 +202,7 @@ int __divsi3(int dividend, int divisor)
   }
   return Q;
 }
+unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3")));
 
 
 unsigned __umodsi3(unsigned dividend, unsigned divisor)
@@ -225,9 +226,7 @@ unsigned __umodsi3(unsigned dividend, unsigned divisor)
   }
   return R;
 }
-
 unsigned __modsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umodsi3")));
-
 
 unsigned __umulsi3(unsigned a, unsigned b)
 {
@@ -240,7 +239,6 @@ unsigned __umulsi3(unsigned a, unsigned b)
   }
   return res;
 }
-
 unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
 
 int sprintf(char* out, const char* format, ...)
@@ -263,19 +261,19 @@ int vsprintf(char* out, const char* format, va_list argp)
 	precision = format[1] - '0';
 	format += 2;
       }
-      
-      if (*format == '%') {
+      const char fmt = *format;
+      if (fmt == '%') {
         *out++ = '%';
-      } else if (*format == 'c') {
+      } else if (fmt == 'c') {
         char char_to_print = va_arg(argp, int);
         *out++ = char_to_print;
-      } else if (*format == 's') {
+      } else if (fmt == 's') {
         char* str_to_print = va_arg(argp, char*);
         while (*str_to_print) {
 	  *out++ = *str_to_print++;
 	  if (precision && --precision == 0) break;
 	}
-      } else if (*format == 'd' || (*format == 'i'))  {
+      } else if (fmt == 'd' || (fmt == 'i'))  {
         uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
 	int int_to_print = va_arg(argp, int);
 	if (int_to_print < 0) {
@@ -289,29 +287,29 @@ int vsprintf(char* out, const char* format, va_list argp)
 	  int_to_print /= 10;
 	} while (int_to_print);
 	out += sprintf(out, temp + tempi);
-      } else if (*format == 'u')  {
+      } else if (fmt == 'u')  {
         uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
 	unsigned int_to_print = va_arg(argp, unsigned);
 	// format unsigned
 	do {
 	  int _ = int_to_print % 10;
 	  temp[--tempi] = '0' + _;
-	  int_to_print >>= 4; // /10;
+	  int_to_print /= 10;
 	} while (int_to_print);
 	out += sprintf(out, temp + tempi);
-      } else if (*format == 'x' || *format == 'p') {
+      } else if (fmt == 'x' || fmt == 'p' || fmt == 'X') {
 	uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
 	unsigned hex_to_print = va_arg(argp, int);
 	// hex format int
 	do {
 	  int _ = hex_to_print & 0xf;
-	  if (_ > 9) _ += 'a' - '9' - 1;
+	  if (_ > 9) _ += (fmt == 'X' ? 'A' : 'a') - '9' - 1;
 	  temp[--tempi] = '0' + _;
 	  hex_to_print >>= 4;
 	} while (hex_to_print);
 	out += sprintf(out, temp + tempi);
 #if 0
-      } else if (*format == 'f')  {
+      } else if (fmt == 'f')  {
         float float_to_print = va_arg(argp, double);
 	// format float - TODO: all the really complex stuff, ...
 	int _ = float_to_print;
@@ -319,7 +317,7 @@ int vsprintf(char* out, const char* format, va_list argp)
 	out += sprintf(out, "%d.%d", _, __ % 10);
 #endif
       } else {
-        out += sprintf(out, "NIY: %%%c", *format);
+        out += sprintf(out, "NIY: %%%c", fmt);
       }
     } else {
 #ifdef DOS
