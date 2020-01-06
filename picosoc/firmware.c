@@ -245,15 +245,19 @@ int sprintf(char* out, const char* format, ...)
   __attribute__ ((format (printf, 2, 3)));
 int vsprintf(char* out, const char* format, va_list argp)
 {
-  char* _out = out;
+  const char* _out = out;
   char temp[23]; // temp. formating buffer
-  while (*format) {
+  uint8_t tempi = sizeof(temp);
+  for (; *format; ++format) {
     if (*format == '%') {
       ++format;
       
       // TODO: >9 (single digit) format and precision!
       // TODO: and support for all formats, ...
-      uint8_t precision = 0, width = 0;
+      uint8_t precision = 0, width = 0, zeros = 0;
+      if (*format == '0') {
+	zeros = *format++;
+      }
       if (isdigit(*format)) {
 	width = *format++ - '0';
       }
@@ -273,8 +277,7 @@ int vsprintf(char* out, const char* format, va_list argp)
 	  *out++ = *str_to_print++;
 	  if (precision && --precision == 0) break;
 	}
-      } else if (fmt == 'd' || (fmt == 'i'))  {
-        uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
+      } else if (fmt == 'd' || fmt == 'i')  {
 	int int_to_print = va_arg(argp, int);
 	if (int_to_print < 0) {
 	  *out++ = '-';
@@ -286,9 +289,8 @@ int vsprintf(char* out, const char* format, va_list argp)
 	  temp[--tempi] = '0' + _;
 	  int_to_print /= 10;
 	} while (int_to_print);
-	out += sprintf(out, temp + tempi);
+	goto output;
       } else if (fmt == 'u')  {
-        uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
 	unsigned int_to_print = va_arg(argp, unsigned);
 	// format unsigned
 	do {
@@ -296,9 +298,8 @@ int vsprintf(char* out, const char* format, va_list argp)
 	  temp[--tempi] = '0' + _;
 	  int_to_print /= 10;
 	} while (int_to_print);
-	out += sprintf(out, temp + tempi);
+	goto output;
       } else if (fmt == 'x' || fmt == 'p' || fmt == 'X') {
-	uint8_t tempi = sizeof(temp); temp[--tempi] = 0;
 	unsigned hex_to_print = va_arg(argp, int);
 	// hex format int
 	do {
@@ -307,7 +308,7 @@ int vsprintf(char* out, const char* format, va_list argp)
 	  temp[--tempi] = '0' + _;
 	  hex_to_print >>= 4;
 	} while (hex_to_print);
-	out += sprintf(out, temp + tempi);
+	goto output;
 #if 0
       } else if (fmt == 'f')  {
         float float_to_print = va_arg(argp, double);
@@ -327,7 +328,13 @@ int vsprintf(char* out, const char* format, va_list argp)
 #endif
       *out++ = *format;
     }
-    ++format;
+
+    continue;
+    
+  output:
+    // copy to output buffer and implicitly reset tempi
+    for (; tempi < sizeof(temp); ++tempi)
+      *out++ = temp[tempi];
   }
 
   *out = 0;
@@ -741,15 +748,15 @@ const uint8_t charset[] = {
 const char banner[80] = "Hello Pico RISCV32 SoC World! https://rene.rene.name ;-)";
 
 
+const uint32_t jit[] = {
+  0x00400593,
+  0x00b55533,
+  0x00050533,
+  0x00008067,
+};
+
 void main()
 {
-	static uint32_t jit[] = {
-	  0x00400593,
-	  0x00b55533,
-	  0x00050533,
-	  0x00008067,
-	};
-
 	uint32_t* vga_vram = (void*)0x80000000;
 	uint32_t* vga_font = (void*)0x80400000;
 
@@ -768,7 +775,7 @@ void main()
 	
 	reg_leds = 127;
 	while (getchar_prompt("Press ENTER to continue..\n") != '\r') { /* wait */ }
-
+	
 	print("\n");
 	print("  ____  _          ____         ____\n");
 	print(" |  _ \\(_) ___ ___/ ___|  ___  / ___|\n");
