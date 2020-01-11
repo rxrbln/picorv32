@@ -2,7 +2,7 @@
 CROSS=riscv32-unknown-elf-
 CFLAGS=
 
-ADDV=video_timing.v vga.v
+ADDV=video_timing.v vga.v audio.v
 
 # ---- iCE40 HX8K Breakout Board ----
 
