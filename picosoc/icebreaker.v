@@ -136,11 +136,13 @@ module icebreaker (
 		.rdata  (vgamem_rdata)
 	);
 
-        wire 	   dac_sel = iomem_valid && iomem_addr == 32'h 0400_0000;
+        wire dac_sel = iomem_valid && iomem_addr == 32'h 0400_0000;
+        wire dac_ready;
         audio audio (.clk(clk2),
 		     .dsd(P2_4),
 		     .resetn(resetn),
 		     .sel    (dac_sel),
+		     .ready  (dac_ready),
 		     .addr   (iomem_addr[23:0]),
 		     .wstrb  (iomem_wstrb),
 		     .wdata  (iomem_wdata),
@@ -166,13 +168,13 @@ module icebreaker (
 			   iomem_ready <= vgamem_ready;
 			   iomem_rdata <= vgamem_rdata;
 			end else if (dac_sel) begin
-			   iomem_ready <= 1; // TODO: just ACK for now
+			   iomem_ready <= dac_ready;
 			end
 		end
 	end
 
 	picosoc #(
-		.BARREL_SHIFTER(1),
+		.BARREL_SHIFTER(0),
 		.ENABLE_MULDIV(0),
 		.ENABLE_COMPRESSED(1),
 		.MEM_WORDS(MEM_WORDS)
