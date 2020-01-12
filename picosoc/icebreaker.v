@@ -40,6 +40,8 @@ module icebreaker (
 
 	output P1A1, P1A2, P1A3, P1A4, P1A7, P1A8, P1A9, P1A10,
 	output P1B1, P1B2, P1B3, P1B4, P1B7, P1B8, P1B9, P1B10,
+
+	output P2_4,
 	
 	output flash_csb,
 	output flash_clk,
@@ -106,6 +108,7 @@ module icebreaker (
 		.D_IN_0({flash_io3_di, flash_io2_di, flash_io1_di, flash_io0_di})
 	);
 
+   
 	wire        iomem_valid;
 	reg         iomem_ready;
 	wire [3:0]  iomem_wstrb;
@@ -133,6 +136,17 @@ module icebreaker (
 		.rdata  (vgamem_rdata)
 	);
 
+        wire 	   dac_sel = iomem_valid && iomem_addr == 32'h 0400_0000;
+        audio audio (.clk(clk2),
+		     .dsd(P2_4),
+		     .resetn(resetn),
+		     .sel    (dac_sel),
+		     .addr   (iomem_addr[23:0]),
+		     .wstrb  (iomem_wstrb),
+		     .wdata  (iomem_wdata),
+		     );
+   
+
 	reg [31:0] gpio;
 	assign leds = gpio;
 
@@ -151,13 +165,16 @@ module icebreaker (
 			end else if (vgamem_sel && !iomem_ready) begin
 			   iomem_ready <= vgamem_ready;
 			   iomem_rdata <= vgamem_rdata;
+			end else if (dac_sel) begin
+			   iomem_ready <= 1; // TODO: just ACK for now
 			end
 		end
 	end
 
 	picosoc #(
-		.BARREL_SHIFTER(0),
+		.BARREL_SHIFTER(1),
 		.ENABLE_MULDIV(0),
+		.ENABLE_COMPRESSED(1),
 		.MEM_WORDS(MEM_WORDS)
 	) soc (
 		.clk          (clk2        ),

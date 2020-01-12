@@ -43,3 +43,6 @@ set_io P1B7       42
 set_io P1B8       36
 set_io P1B9       32
 set_io P1B10      28
+
+# PMOD 2
+set_io P2_4	  19

@@ -38,11 +38,17 @@ extern uint32_t sram;
 #define reg_uart_clkdiv (*(volatile uint32_t*)0x02000004)
 #define reg_uart_data (*(volatile uint32_t*)0x02000008)
 #define reg_leds (*(volatile uint32_t*)0x03000000)
+#define reg_dac (*(volatile uint16_t*)0x04000000)
 
 // --------------------------------------------------------
 
 extern uint32_t flashio_worker_begin;
 extern uint32_t flashio_worker_end;
+
+static uint32_t* vga_vram = (void*)0x80000000;
+static uint32_t* vga_font = (void*)0x80400000;
+
+static uint32_t vgax = 0, vgay = 0;
 
 void flashio(uint8_t *data, int len, uint8_t wrencmd)
 {
@@ -159,9 +165,20 @@ void enable_flash_crm()
 
 void putchar(char c)
 {
-	if (c == '\n')
-		putchar('\r');
-	reg_uart_data = c;
+  vga_vram[vgay * 128 + vgax++] = 0x700 | c;
+
+  if (c == '\n') {
+    reg_uart_data = '\r';
+    
+    // clear rest of line
+    while (vgax < 128)
+      vga_vram[vgay * 128 + vgax++] = 0;
+    
+    vgax = 0;
+    ++vgay;
+    if (vgay > 30) vgay = 0;
+  }
+  reg_uart_data = c;
 }
 
 void print(const char *p)
@@ -744,6 +761,29 @@ void cmd_echo()
 		putchar(c);
 }
 
+uint8_t getbyte() {
+  int32_t c = -1;
+  while (c == -1) {
+    c = reg_uart_data;
+  }
+  return c;
+}
+
+void cmd_dac()
+{
+#if 1
+	print("DAC UART Echo, no return to prompt!\n\n");
+	uint16_t c;
+	while (c = getbyte())
+#else
+	print("Return to menu by sending '!'\n\n");
+	char c;
+	while ((c = getchar()) != '!')
+#endif
+	  reg_dac = (c << 8); // scale to 16-bit, ...
+}
+
+
 // --------------------------------------------------------
 
 
@@ -752,7 +792,6 @@ const uint8_t charset[] = {
 };
 
 const char banner[80] = "RX32 SoC, initializing. https://rene.rene.name ;-)";
-
 
 const uint32_t jit[] = {
   0x00400593,
@@ -763,9 +802,6 @@ const uint32_t jit[] = {
 
 void main()
 {
-	uint32_t* vga_vram = (void*)0x80000000;
-	uint32_t* vga_font = (void*)0x80400000;
-
 	volatile uint32_t* vga_mmio = (void*)0x80800000;
 	uint32_t cursor = 0;
 	
@@ -815,7 +851,7 @@ void main()
 		print("   [0] Benchmark all configs\n");
 		print("   [M] Run Memtest\n");
 		print("   [S] Print SPI state\n");
-		print("   [c] Move VGA cursor\n");
+		print("   [c] Move VGA cursor [d] Dac echo UART\n");
 		print("   [e] Echo UART\n");
 		print("\n");
 
@@ -872,6 +908,9 @@ void main()
 				break;
 			case 'e':
 				cmd_echo();
+				break;
+			case 'd':
+				cmd_dac();
 				break;
 			case 'c':
 			case 'C':

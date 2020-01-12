@@ -34,70 +34,70 @@
                         |
                        --- GND
                         -
+ # sox some.wav --bits 8 --encoding unsigned-integer -c 1 -r 14400 uart.raw
 */
 
 module audio (
    input clk, 
-   output reg dsd,
+   output dsd,
    output reg word,
    output reg frame,
+
+   input resetn,
+   input        sel,
+   input [ 3:0] wstrb,
+   input [23:0] addr,
+   input [31:0] wdata,
 );
 
-   //localparam [15:0] oversample = 250;
-   reg [15:0] cnt = 0;
-   reg [15:0] pwm = 8'b11110010;
-   reg [31:0] v = 0;
+   localparam [15:0] clkdiv = 17; // ~= 12MHz / 44100 / 16
+   reg [15:0] clk2 = 0;
+   reg [3:0] dacbit = 0;
+   reg [16:0] pwm = 0; // 1-bit more for overflow / carry
+   reg [15:0] dacdata = 16'h7fff;
 
+   assign dsd = pwm[16]; // directly to overflow / carry
+   
    //              EG    x   PG
    //out[15:0] <= envelope * phase;
 
+   
    //   _
    // _| |__   /|/_
 
    always @(posedge clk) begin
-      cnt <= cnt + 1;
-
-      /*
-      // I2S world and frame clock
-      dsd <= cnt[0];
-      if (cnt == 15)
-	word <= ~word;
+      clk2 <= clk2 + 1;
       
-      if (cnt == 31) begin
-	 word <= ~word;
-	 frame <= ~frame;
-	 cnt <= 0;
-      end
-       */
-      
-      if (cnt[1:0] == 3) begin
-
-	 // generate cheap signal
-	 if (cnt[1:0] == 3) begin
-	    v <= v + 1;
+      if (0) begin
+	 // I2S world and frame clock
+	 dsd <= clk2[0];
+	 if (clk2 == 15)
+	   word <= ~word;
+	 if (clk2 == 31) begin
+	    word <= ~word;
+	    frame <= ~frame;
+	    clk2 <= 0;
 	 end
+      end else begin
+	 if (clk2 == clkdiv) begin // div for target pwm freq
+	    clk2 <= 0;
+	    dacbit <= dacbit + 1;
+	    //if (dacbit == 4'hf) dacdada <= dacdata + 2300; // test inc only
+	    
+	    // 1st order delta sigma accumulation
+	    pwm <= pwm[15:0] + dacdata + 1;
+	 end
+      end
+   end 
 
-	 // map to digital bitstream
-	 case (v[3:0])
-	   4'h0 : pwm <= 16'b0000000000000000;
-	   4'h1 : pwm <= 16'b0000000000000001;
-	   4'h2 : pwm <= 16'b0000000000000011;
-	   4'h3 : pwm <= 16'b0000000000000111;
-	   4'h4 : pwm <= 16'b0000000000001111;
-	   4'h5 : pwm <= 16'b0000000000011111;
-	   4'h6 : pwm <= 16'b0000000000111111;
-	   4'h7 : pwm <= 16'b0000000011111111;
-	   4'h8 : pwm <= 16'b0000000111111111;
-	   4'h9 : pwm <= 16'b0000001111111111;
-	   4'ha : pwm <= 16'b0000011111111111;
-	   4'hb : pwm <= 16'b0000111111111111;
-	   4'hc : pwm <= 16'b0001111111111111;
-	   4'hd : pwm <= 16'b0011111111111111;
-	   4'he : pwm <= 16'b0111111111111111;
-	   4'hf : pwm <= 16'b1111111111111111;
-	 endcase
-	 
-	 dsd <= pwm[15 - cnt[5:2]];
+   // mmio system bus interface
+   always @(posedge clk) begin
+      if (resetn) begin
+	 if (sel) begin
+	    if (wstrb[0]) dacdata[ 7: 0] <= wdata[ 7: 0];
+	    if (wstrb[1]) dacdata[15: 8] <= wdata[15: 8];
+	 end
       end
    end
+
 endmodule
