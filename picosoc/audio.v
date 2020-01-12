@@ -75,7 +75,9 @@ module audio (
    reg [3:0] dacbit = 0;
    reg [16:0] pwm = 0; // 1-bit more for overflow / carry
    reg [15:0] dacdata = 16'h7fff;
-
+   reg [15:0] dacnext = 16'h7fff;
+   reg 	      dacfree = 1;
+   
    assign dsd = pwm[16]; // directly to overflow / carry
    
    //              EG    x   PG
@@ -102,20 +104,26 @@ module audio (
 	 if (clk2 == clkdiv) begin // div for target pwm freq
 	    clk2 <= 0;
 	    dacbit <= dacbit + 1;
+
+	    // copy fifo for next sample
+	    if (dacbit == 15) begin
+	       dacdata <= dacnext;
+	       dacfree <= 1;
+	    end
 	    
 	    // 1st order delta sigma accumulation
-	    pwm <= pwm[15:0] + dacdata + 1;
+	    pwm <= pwm[15:0] + dacdata;
 	 end
       end
-   end
-
-   // mmio system bus interface
-   always @(posedge clk) begin
+      
+      // mmio system bus interface
       if (resetn) begin
 	 ready <= 0;
-	 if (sel && dacbit == 15) begin
-	    if (wstrb[0]) dacdata[ 7: 0] <= wdata[ 7: 0];
-	    if (wstrb[1]) dacdata[15: 8] <= wdata[15: 8];
+	 // when selected, wait for free DAC fifo
+	 if (sel && dacfree) begin
+	    if (wstrb[0]) dacnext[ 7: 0] <= wdata[ 7: 0];
+	    if (wstrb[1]) dacnext[15: 8] <= wdata[15: 8];
+	    dacfree <= 0;
 	    ready <= 1;
 	 end
       end

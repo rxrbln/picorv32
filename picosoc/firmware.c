@@ -761,6 +761,9 @@ void cmd_echo()
 		putchar(c);
 }
 
+const uint16_t audiofile[] = {
+};
+
 uint8_t getbyte() {
   int32_t c = -1;
   while (c == -1) {
@@ -769,18 +772,28 @@ uint8_t getbyte() {
   return c;
 }
 
+
+
 void cmd_dac()
 {
-#if 1
-	print("DAC UART Echo, no return to prompt!\n\n");
-	uint16_t c;
-	while (c = getbyte())
+  print("DAC UART Echo, no return to prompt!\n\n");
+/*
+  uint16_t c;
+#if 1 
+  while (c = getbyte())
+    reg_dac = (c << 8); // scale to 16-bit, ...
 #else
-	print("Return to menu by sending '!'\n\n");
-	char c;
-	while ((c = getchar()) != '!')
+  for (uint16_tc = 0; 1; ++c)
+    reg_dac = c;
 #endif
-	  reg_dac = (c << 8); // scale to 16-bit, ...
+*/
+
+  for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile); ++i)
+    reg_dac = audiofile[i];
+  
+  //for (int i = 0; 1; ++i) reg_dac = i & 1 ? 0xffff : 0;
+  
+  reg_dac = 0x0000;
 }
 
 
