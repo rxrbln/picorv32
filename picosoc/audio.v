@@ -1,4 +1,22 @@
 /*
+ *  Audio - 1 bit Delta-sigma modulation DAC
+ *
+ *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
+ *
+ *  Permission to use, copy, modify, and/or distribute this software for any
+ *  purpose with or without fee is hereby granted, provided that the above
+ *  copyright notice and this permission notice appear in all copies.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ *  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ *  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ *  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ *  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ *  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ *  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
  pc speaker:	1 square wave, 2 levels
  PCjr / Tandy:	3 square waves, 16 levels + noise channel
  OPL			
@@ -34,7 +52,8 @@
                         |
                        --- GND
                         -
- # sox some.wav --bits 8 --encoding unsigned-integer -c 1 -r 14400 uart.raw
+ # sox some.wav --bits 16 -B --encoding unsigned-integer -c 1 -r 14400 uart.raw
+ # dd if=uart.raw bs=1024 count=2048 | xxd -p | fold | sed "s/..../0x&,/g"
 */
 
 module audio (
@@ -44,7 +63,8 @@ module audio (
    output reg frame,
 
    input resetn,
-   input        sel,
+   input sel,
+   output reg ready,
    input [ 3:0] wstrb,
    input [23:0] addr,
    input [31:0] wdata,
@@ -82,20 +102,21 @@ module audio (
 	 if (clk2 == clkdiv) begin // div for target pwm freq
 	    clk2 <= 0;
 	    dacbit <= dacbit + 1;
-	    //if (dacbit == 4'hf) dacdada <= dacdata + 2300; // test inc only
 	    
 	    // 1st order delta sigma accumulation
 	    pwm <= pwm[15:0] + dacdata + 1;
 	 end
       end
-   end 
+   end
 
    // mmio system bus interface
    always @(posedge clk) begin
       if (resetn) begin
-	 if (sel) begin
+	 ready <= 0;
+	 if (sel && dacbit == 15) begin
 	    if (wstrb[0]) dacdata[ 7: 0] <= wdata[ 7: 0];
 	    if (wstrb[1]) dacdata[15: 8] <= wdata[15: 8];
+	    ready <= 1;
 	 end
       end
    end
