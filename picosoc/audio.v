@@ -110,10 +110,10 @@ module audio (
 	       dacdata <= dacnext;
 	       dacfree <= 1;
 	    end
-	    
-	    // 1st order delta sigma accumulation
-	    pwm <= pwm[15:0] + dacdata;
 	 end
+
+         // 1st order delta sigma accumulation
+         pwm <= pwm[15:0] + dacdata;
       end
       
       // mmio system bus interface
