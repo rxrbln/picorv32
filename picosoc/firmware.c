@@ -38,15 +38,15 @@ extern uint32_t sram;
 #define reg_uart_clkdiv (*(volatile uint32_t*)0x02000004)
 #define reg_uart_data (*(volatile uint32_t*)0x02000008)
 #define reg_leds (*(volatile uint32_t*)0x03000000)
-#define reg_dac (*(volatile uint16_t*)0x04000000)
+#define reg_dac ((volatile uint32_t*)0x40000000)
+
+static uint32_t* vga_vram = (void*)0x80000000;
+static uint32_t* vga_font = (void*)0x80400000;
 
 // --------------------------------------------------------
 
 extern uint32_t flashio_worker_begin;
 extern uint32_t flashio_worker_end;
-
-static uint32_t* vga_vram = (void*)0x80000000;
-static uint32_t* vga_font = (void*)0x80400000;
 
 static uint32_t vgax = 0, vgay = 0;
 
@@ -764,6 +764,9 @@ void cmd_echo()
 const uint16_t audiofile[] = {
 };
 
+const uint16_t vgmfile[] = {
+};
+
 uint8_t getbyte() {
   int32_t c = -1;
   while (c == -1) {
@@ -772,7 +775,13 @@ uint8_t getbyte() {
   return c;
 }
 
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
 
+
+const uint16_t sn_vol_tab[16] = {
+  32767, 26028, 20675, 16422, 13045, 10362,  8231,  6568,
+  5193,  4125,  3277,  2603,  2067,  1642,  1304,     0
+};
 
 void cmd_dac()
 {
@@ -789,11 +798,96 @@ void cmd_dac()
 */
 
   for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile); ++i)
-    reg_dac = audiofile[i];
-  
+    reg_dac[0] = audiofile[i];
   //for (int i = 0; 1; ++i) reg_dac = i & 1 ? 0xffff : 0;
+  reg_dac[0] = 0; // silence DAC
   
-  reg_dac = 0x0000;
+  // volume | freq / half period length
+  //reg_dac[4] = (0x1000 << 16) | (100/2); // fm0
+  //reg_dac[5] = (0x2000 << 16) | (44/2); // fm1 440
+  //reg_dac[6] = (0x7000 << 16) | (882/2); // fm2
+  //reg_dac[7] = (0x7000 << 16) | (882/2); // fm3 NYI noise
+  
+  
+  uint32_t offset = *(uint32_t*)(vgmfile + 0x34);
+  printf("%.4s %x %d %d\n", vgmfile, *(uint32_t*)(vgmfile + 0x8),
+	 *(uint32_t*)(vgmfile + 0x0c), offset);
+  
+  // samples @ 44.1kHz, yay!
+  uint8_t reg = 0;
+  uint16_t regs[8] = {}; // tone, volume, ...
+  
+  const int verbose = 0;
+  
+  uint32_t cycles_begin;
+  
+  offset = offset ? offset : 0xc;
+  for (int i = 0x34 + offset; i < sizeof(vgmfile); ++i) {
+    int wait = 0;
+    uint8_t c = vgmfile[i];
+    
+    if (c == 0x50) { // SN76489/96 register write
+      c = vgmfile[++i];
+      if (verbose)
+	printf("SN: %x\n", c);
+      
+      // SN76489 has 8 "registers":
+      // 4 x 4 bit volume registers, 3 x 10 bit tone registers, and
+      // 1 x 3 bit noise register.
+      
+      if (c & 0x80) { // LATCH?
+	reg = (c >> 4) & 0b111;
+	regs[reg] = (regs[reg] & 0xff0) | (c & 0xf);
+      } else {
+	if (reg & 1) {// 4-bit volume
+	  regs[reg] = c & 0xf; // a bit superflous?
+	} else { // 10-bit tone register
+	  regs[reg] = (regs[reg] & 0x00f) | ((c & 0x3f) << 4);
+	} 
+      }
+      
+      if (verbose)
+	printf("REG[%d, %s]: %d %dHz %d/db/\n",
+	       (reg >> 1), (reg & 1 ? "VOL" : "FRQ"),
+	       regs[reg], 3579545 / 16 / MAX(regs[reg & 0xe], 1),
+	       -regs[reg | 1]);
+      
+      // translate to our mmio FM registers
+      const uint8_t ch = (reg >> 1);
+      const uint16_t vol = sn_vol_tab[regs[reg | 1]];
+      uint16_t frq = regs[reg & 0xe];
+      if (frq) frq = 3579545 / 16 / 2 / frq;
+      
+      if (verbose)
+	printf("ch: %d f: %d: vol: %d\n", ch, frq, vol);
+      //if (ch == 1) 
+      reg_dac[4 + ch] = (vol << 16) | (44100 / 2 / frq);
+    } else if (c == 0x61) {
+      wait = (uint8_t)vgmfile[++i] + vgmfile[++i] * 256;
+    } else if (c == 0x62) {
+      wait = 735; // wait 735 samples
+    } else if (c == 0x63) {
+      wait = 882; // wait 882 samples
+    } else if (c >= 0x70 && c <= 0x7f) {
+      wait = c - 0x70 + 1; // wait n+1 samples
+    } else if (c == 0x66) {
+      printf("EOF\n");
+      break;
+    } else {
+      printf("NYI: %x\n", c);
+    }
+    
+    if (wait) {
+      //printf("wait: %d\n", wait);
+      wait = 12000000 / 44100 * wait;
+      uint32_t cycles_now;
+      do {
+	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+      } while (cycles_now - cycles_begin < wait);
+    }
+    // update after reach command to help compensate expensive div delay?
+    __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
+  }
 }
 
 
@@ -840,10 +934,12 @@ void main()
 	print("\n");
 
 	printf("Total memory: %dKiB\n\n", MEM_TOTAL / 1024);
-
+	
 	cmd_memtest();
 	print("\n");
-
+	
+	set_flash_mode_qddr(); // default to qddr for our convinience
+	
 	cmd_print_spi_state();
 	print("\n");
 	
