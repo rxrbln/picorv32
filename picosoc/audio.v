@@ -1,7 +1,7 @@
 /*
  *  Audio - 1 bit Delta-sigma modulation DAC
  *
- *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
+fi *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
@@ -19,8 +19,10 @@
 /*
  pc speaker:	1 square wave, 2 levels
  PCjr / Tandy:	3 square waves, 16 levels + noise channel
- OPL			
- OPL2		9 channels, 2 osc, or -3 ch for +5 percussions, 4 “sine” waveforms
+ GameBlaster	12 square wave, stereo, 4 of which can be used for noise
+ OPM		8-channel, 4-operator
+ OPL		9 channel, two operators
+ OPL2		9 channel, 2 osc, or -3 ch for +5 percussions, 4 (3 new) “sine” waveforms
  OPL3		18 ch, simple stereo, 4 new waveforms, 
  
  adlib:		0x388 Address/Status port, 0x389 Data Write
@@ -56,6 +58,20 @@
  # dd if=uart.raw bs=1024 count=2048 | xxd -p | fold | sed "s/..../0x&,/g"
 */
 
+module fmop(input clk,
+	    input [15:0] fmreg,
+	    output reg [15:0] fmval);
+   
+   always @(posedge clk) begin
+      case (fmreg[15:14])
+	2'b00: fmval <= fmval + fmreg[13:0]; // square
+	2'b01: fmval <= fmval + fmreg[13:0]; // triangle
+	2'b10: fmval <= fmval + fmreg[13:0]; // sawtooth
+	2'b11: fmval <= fmval + fmreg[13:0]; // noise
+      endcase
+   end
+endmodule
+
 module audio (
    input clk, 
    output dsd,
@@ -77,7 +93,7 @@ module audio (
    reg [15:0] dacdata = 16'h7fff;
    reg [15:0] dacnext = 16'h7fff;
    reg 	      dacfree = 1;
-   
+
    assign dsd = pwm[16]; // directly to overflow / carry
    
    //              EG    x   PG
@@ -86,6 +102,40 @@ module audio (
    
    //   _
    // _| |__   /|/_
+   
+   // FM operators
+ 
+   reg 	      fm0;
+   reg [15:0] fm0frq = 0;
+   reg [15:0] fm0vol = 0;
+   reg [15:0] fm0cnt = 0;
+   wire [15:0] fm0out = (fm0 && fm0frq != 16'b0) ? fm0vol : 16'b0;
+   
+   reg 	      fm1;
+   reg [15:0] fm1frq = 0;
+   reg [15:0] fm1vol = 0;
+   reg [15:0] fm1cnt = 0;
+   wire [15:0] fm1out = (fm1 && fm1frq != 16'b0) ? fm1vol : 16'b0;
+   
+   reg 	      fm2;
+   reg [15:0] fm2frq = 0;
+   reg [15:0] fm2vol = 0;
+   reg [15:0] fm2cnt = 0;
+   wire [15:0] fm2out = (fm2 && fm2frq != 16'b0) ? fm2vol : 16'b0;
+   
+ /*  
+   fmop fm0 (
+      .clk(clk),
+      .fmreg(fm0reg),
+      .fmval(fm0out)
+    );
+
+   fmop fm1 (
+      .clk(clk),
+      .fmreg(fm1reg),
+      .fmval(fm1out)
+    );
+*/
 
    always @(posedge clk) begin
       clk2 <= clk2 + 1;
@@ -107,11 +157,37 @@ module audio (
 
 	    // copy fifo for next sample
 	    if (dacbit == 15) begin
-	       dacdata <= dacnext;
+	       if (fm0cnt != 0)
+		 fm0cnt = fm0cnt - 1;
+	       else begin
+		  fm0 <= ~fm0;
+		  fm0cnt <= fm0frq;
+	       end
+	       if (fm1cnt != 0)
+		  fm1cnt <= fm1cnt - 1;
+	       else begin
+		  fm1 <= ~fm1;
+		  fm1cnt <= fm1frq;
+	       end
+	       if (fm2cnt != 0)
+		 fm2cnt <= fm2cnt - 1;
+	       else begin
+		  fm2 <= ~fm2;
+		  fm2cnt <= fm2frq;
+	       end
+	       
+	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
+
+	       //    _____.      0xffff  0x7fff
+	       //    |    |                -0-
+	       // ___|    |___ 0         -80000
+	       
+	       dacdata <= dacnext +
+			  ((fm0out + fm1out + fm2out) >> 4);
 	       dacfree <= 1;
 	    end
 	 end
-
+	 
          // 1st order delta sigma accumulation
          pwm <= pwm[15:0] + dacdata;
       end
@@ -121,9 +197,37 @@ module audio (
 	 ready <= 0;
 	 // when selected, wait for free DAC fifo
 	 if (sel && dacfree) begin
-	    if (wstrb[0]) dacnext[ 7: 0] <= wdata[ 7: 0];
-	    if (wstrb[1]) dacnext[15: 8] <= wdata[15: 8];
-	    dacfree <= 0;
+	    case (addr)
+	      24'h00010:
+		begin
+		   if (wstrb[0]) fm0frq[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) fm0frq[15: 8] <= wdata[15: 8];
+		   if (wstrb[2]) fm0vol[ 7: 0] <= wdata[23:16];
+		   if (wstrb[3]) fm0vol[15: 8] <= wdata[31:24];
+		end
+	      24'h00014:
+		begin
+		   if (wstrb[0]) fm1frq[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) fm1frq[15: 8] <= wdata[15: 8];
+		   if (wstrb[2]) fm1vol[ 7: 0] <= wdata[23:16];
+		   if (wstrb[3]) fm1vol[15: 8] <= wdata[31:24];
+		end
+	      24'h00018:
+		begin
+		   if (wstrb[0]) fm2frq[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) fm2frq[15: 8] <= wdata[15: 8];
+		   if (wstrb[2]) fm2vol[ 7: 0] <= wdata[23:16];
+		   if (wstrb[3]) fm2vol[15: 8] <= wdata[31:24];
+		end
+
+	      //24'h00004: // NYI: right DAC
+	      default: // left DAC
+		begin
+		   if (wstrb[0]) dacnext[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) dacnext[15: 8] <= wdata[15: 8];
+		   dacfree <= 0;
+		end
+	    endcase
 	    ready <= 1;
 	 end
       end
