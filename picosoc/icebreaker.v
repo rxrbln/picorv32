@@ -136,7 +136,7 @@ module icebreaker (
 		.rdata  (vgamem_rdata)
 	);
 
-        wire dac_sel = iomem_valid && iomem_addr == 32'h 0400_0000;
+        wire dac_sel = iomem_valid && iomem_addr[30]; // 2nd MSB
         wire dac_ready;
         audio audio (.clk(clk2),
 		     .dsd(P2_4),
@@ -176,7 +176,7 @@ module icebreaker (
 	picosoc #(
 		.BARREL_SHIFTER(0),
 		.ENABLE_MULDIV(0),
-		.ENABLE_COMPRESSED(1),
+		.ENABLE_COMPRESSED(0),
 		.MEM_WORDS(MEM_WORDS)
 	) soc (
 		.clk          (clk2        ),
