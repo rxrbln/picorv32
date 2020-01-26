@@ -2,6 +2,7 @@
  *  PicoSoC - A simple example SoC using PicoRV32
  *
  *  Copyright (C) 2017  Clifford Wolf <clifford@clifford.at>
+ *  Copyright (C) 2020  René Rebe <rene@exactcode.de>
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
@@ -63,12 +64,13 @@ module icebreaker (
    wire    pixclk;
    wire    clk2;
    
-   SB_PLL40_2_PAD #(
+   SB_PLL40_2F_PAD #(
       .FEEDBACK_PATH("SIMPLE"),
-      .DIVR(4'd0),
-      .DIVF(7'd68),
-      .DIVQ(3'd5),
-      .FILTER_RANGE(3'd1)
+      .DIVR(4'b0000),
+      .DIVF(7'b1000100),
+      .DIVQ(3'b101),
+      .FILTER_RANGE(3'b101),
+      .PLLOUT_SELECT_PORTA("GENCLK_HALF"),
    ) pll (
       .RESETB(1'b1),
       .BYPASS(1'b0),

@@ -86,7 +86,7 @@ module audio (
    input [31:0] wdata,
 );
 
-   localparam [15:0] clkdiv = 17; // ~= 12MHz / 44100 / 16
+   localparam [15:0] clkdiv = 18; // ~= 12MHz / 44100 / 16
    reg [15:0] clk2 = 0;
    reg [3:0] dacbit = 0;
    reg [16:0] pwm = 0; // 1-bit more for overflow / carry

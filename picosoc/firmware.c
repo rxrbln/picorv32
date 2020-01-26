@@ -783,6 +783,8 @@ const uint16_t sn_vol_tab[16] = {
   5193,  4125,  3277,  2603,  2067,  1642,  1304,     0
 };
 
+const uint32_t SYSCLK = 12937000;
+
 void cmd_dac()
 {
   print("DAC UART Echo, no return to prompt!\n\n");
@@ -879,7 +881,7 @@ void cmd_dac()
     
     if (wait) {
       //printf("wait: %d\n", wait);
-      wait = 12000000 / 44100 * wait;
+      wait = SYSCLK / 44100 * wait;
       uint32_t cycles_now;
       do {
 	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
@@ -913,7 +915,8 @@ void main()
 	uint32_t cursor = 0;
 	
 	reg_leds = 31;
-	reg_uart_clkdiv = 104;
+	reg_uart_clkdiv = SYSCLK / 115000;
+	
 	print("Booting..\n");
 
 	reg_leds = 63;
