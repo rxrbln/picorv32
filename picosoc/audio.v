@@ -55,7 +55,7 @@ fi *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
                        --- GND
                         -
  # sox some.wav --bits 16 -B --encoding unsigned-integer -c 1 -r 14400 uart.raw
- # dd if=uart.raw bs=1024 count=2048 | xxd -p | fold | sed "s/..../0x&,/g"
+ # dd if=uart.raw bs=1024 count=4000 | xxd -p | fold | sed "s/..../0x&,/g"
 */
 
 module fmop(input clk,
@@ -90,8 +90,8 @@ module audio (
    reg [15:0] clk2 = 0;
    reg [3:0] dacbit = 0;
    reg [16:0] pwm = 0; // 1-bit more for overflow / carry
-   reg [15:0] dacdata = 16'h7fff;
-   reg [15:0] dacnext = 16'h7fff;
+   reg signed [17:0] dacdata = 18'h0; // 2 overflow bits!
+   reg signed [15:0] dacnext = 16'h0;
    reg 	      dacfree = 1;
 
    assign dsd = pwm[16]; // directly to overflow / carry
@@ -109,19 +109,19 @@ module audio (
    reg [15:0] fm0frq = 0;
    reg [15:0] fm0vol = 0;
    reg [15:0] fm0cnt = 0;
-   wire [15:0] fm0out = (fm0 && fm0frq != 16'b0) ? fm0vol : 16'b0;
+   wire signed [15:0] fm0out = fm0frq == 16'b0 ? fm0frq : fm0 ? fm0vol : -fm0vol;
    
    reg 	      fm1;
    reg [15:0] fm1frq = 0;
    reg [15:0] fm1vol = 0;
    reg [15:0] fm1cnt = 0;
-   wire [15:0] fm1out = (fm1 && fm1frq != 16'b0) ? fm1vol : 16'b0;
+   wire signed [15:0] fm1out = fm1frq == 16'b0 ? fm1frq : fm1 ? fm1vol : -fm1vol;
    
    reg 	      fm2;
    reg [15:0] fm2frq = 0;
    reg [15:0] fm2vol = 0;
    reg [15:0] fm2cnt = 0;
-   wire [15:0] fm2out = (fm2 && fm2frq != 16'b0) ? fm2vol : 16'b0;
+   wire signed [15:0] fm2out = fm2frq == 16'b0 ? fm2frq : fm2 ? fm2vol : -fm2vol;
    
  /*  
    fmop fm0 (
@@ -164,7 +164,7 @@ module audio (
 		  fm0cnt <= fm0frq;
 	       end
 	       if (fm1cnt != 0)
-		  fm1cnt <= fm1cnt - 1;
+		 fm1cnt <= fm1cnt - 1;
 	       else begin
 		  fm1 <= ~fm1;
 		  fm1cnt <= fm1frq;
@@ -177,19 +177,23 @@ module audio (
 	       end
 	       
 	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
-
-	       //    _____.      0xffff  0x7fff
-	       //    |    |                -0-
-	       // ___|    |___ 0         -80000
-	       
-	       dacdata <= dacnext +
-			  ((fm0out + fm1out + fm2out) >> 4);
+	       dacdata <= dacnext + ((fm0out + fm1out + fm2out) >>> 2);
 	       dacfree <= 1;
 	    end
 	 end
-	 
-         // 1st order delta sigma accumulation
-         pwm <= pwm[15:0] + dacdata;
+
+	 // 1st order delta sigma accumulation
+	 // convert from internal signed, to unsigned PWM w/ overflow clipping!
+	 //     ____     0xffff  0x7fff
+	 //    |    |             -0-
+	 // ___|    |___ 0x0000 -0x8000
+
+	 if (dacdata > $signed(18'h7fff))
+	   pwm <= pwm[15:0] + 16'hffff;
+	 else if (dacdata < $signed(-18'h8000))
+	   pwm <= pwm[15:0] + 16'h0000;
+	 else
+	   pwm <= pwm[15:0] + (16'h8000 + $unsigned(dacdata[15:0]) & 16'hffff);
       end
       
       // mmio system bus interface
