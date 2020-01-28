@@ -39,6 +39,8 @@ extern uint32_t sram;
 #define reg_uart_data (*(volatile uint32_t*)0x02000008)
 #define reg_leds (*(volatile uint32_t*)0x03000000)
 #define reg_dac ((volatile uint32_t*)0x40000000)
+#define reg_fm ((volatile uint32_t*)0x40000010)
+#define reg_fm16 ((volatile uint16_t*)0x40000010)
 
 static uint32_t* vga_vram = (void*)0x80000000;
 static uint32_t* vga_font = (void*)0x80400000;
@@ -199,17 +201,16 @@ int isdigit(int c) {
 
 unsigned __udivsi3(unsigned dividend, unsigned divisor)
 {
-  // TODO: W = 32
-  static const int W = 16; // maximum nuber of bits in the dividend & divisor
+  static const int W = 24; // maximum nuber of bits in the dividend & divisor
 
-  int32_t R = dividend; // partial remainder -- need 2*W bits
-  uint16_t Q = 0; /* partial quotient */
-  for (int i = W; i >= 0; --i) {
+  int64_t R = dividend; // partial remainder -- need 2*W bits
+  uint32_t Q = 0; /* partial quotient */
+  for (int8_t i = W; i >= 0; --i) {
     if (R >= 0) {
-      R -= divisor << i;
+      R -= (uint64_t)divisor << i;
       Q += 1 << i;
     } else {
-      R += divisor << i;
+      R += (uint64_t)divisor << i;
       Q -= 1 << i;
     }
   }
@@ -224,16 +225,16 @@ unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3"))
 
 unsigned __umodsi3(unsigned dividend, unsigned divisor)
 {
-  static const int W = 16; /* maximum nuber of bits in the dividend & divisor */
+  static const int W = 23; /* maximum nuber of bits in the dividend & divisor */
 
-  int32_t R = dividend; /* partial remainder -- need 2*W bits */
-  uint16_t Q = 0; /* partial quotient */
-  for (int i = W; i >= 0; --i) {
+  int64_t R = dividend; /* partial remainder -- need 2*W bits */
+  uint32_t Q = 0; /* partial quotient */
+  for (int8_t i = W; i >= 0; --i) {
     if (R >= 0) {
-      R -= divisor << i;
+      R -= (uint64_t)divisor << i;
       Q += 1 << i;
     } else {
-      R += divisor << i;
+      R += (uint64_t)divisor << i;
       Q -= 1 << i;
     }
   }
@@ -257,6 +258,7 @@ unsigned __umulsi3(unsigned a, unsigned b)
   return res;
 }
 unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
+
 
 int sprintf(char* out, const char* format, ...)
   __attribute__ ((format (printf, 2, 3)));
@@ -764,7 +766,7 @@ void cmd_echo()
 const uint16_t audiofile[] = {
 };
 
-const uint16_t vgmfile[] = {
+const uint8_t vgmfile[] = {
 };
 
 uint8_t getbyte() {
@@ -785,9 +787,9 @@ const uint16_t sn_vol_tab[16] = {
 
 const uint32_t SYSCLK = 12937000;
 
-void cmd_dac()
+void cmd_dac(uint8_t alt)
 {
-  print("DAC UART Echo, no return to prompt!\n\n");
+  print("DAC & FM/VGM testing\n");
 /*
   uint16_t c;
 #if 1 
@@ -799,27 +801,29 @@ void cmd_dac()
 #endif
 */
 
+  // volume | freq / half period length
+  //reg_fm[0] = (0x1000 << 16) | (100/2); // fm0
+  //reg_fm[1] = (0x800 << 16) | (100/2); // fm1 440
+  //reg_fm[2] = (0x7000 << 16) | (882/2); // fm2
+  //reg_fm[3] = (0x8000 << 16) | (alt ? 0x8000 | 16*80: 16*d120); // fm3 noise
+  
+  
   for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile); ++i)
     reg_dac[0] = audiofile[i];
   //for (int i = 0; 1; ++i) reg_dac = i & 1 ? 0xffff : 0;
   reg_dac[0] = 0; // silence DAC
   
-  // volume | freq / half period length
-  //reg_dac[4] = (0x1000 << 16) | (100/2); // fm0
-  //reg_dac[5] = (0x2000 << 16) | (44/2); // fm1 440
-  //reg_dac[6] = (0x7000 << 16) | (882/2); // fm2
-  //reg_dac[7] = (0x7000 << 16) | (882/2); // fm3 NYI noise
-  
-  
   uint32_t offset = *(uint32_t*)(vgmfile + 0x34);
-  printf("%.4s %x %d %d\n", vgmfile, *(uint32_t*)(vgmfile + 0x8),
-	 *(uint32_t*)(vgmfile + 0x0c), offset);
+  printf("%.4s %d %x %d\n", vgmfile, offset,
+	 *(uint32_t*)(vgmfile + 0x08),
+	 3579545);
+  //*(uint32_t*)(vgmfile + 0x0c));
   
   // samples @ 44.1kHz, yay!
   uint8_t reg = 0;
   uint16_t regs[8] = {}; // tone, volume, ...
   
-  const int verbose = 0;
+  const uint8_t verbose = 0;
   
   uint32_t cycles_begin;
   
@@ -834,17 +838,20 @@ void cmd_dac()
 	printf("SN: %x\n", c);
       
       // SN76489 has 8 "registers":
-      // 4 x 4 bit volume registers, 3 x 10 bit tone registers, and
-      // 1 x 3 bit noise register.
+      // 4 x 4 bit volume registers plus:
+      // 3 x 10 bit tone registers & 1 x 3 bit noise register
       
       if (c & 0x80) { // LATCH?
 	reg = (c >> 4) & 0b111;
 	regs[reg] = (regs[reg] & 0xff0) | (c & 0xf);
       } else {
-	if (reg & 1) {// 4-bit volume
+	if (reg & 1) { // 4-bit volume
 	  regs[reg] = c & 0xf; // a bit superflous?
 	} else { // 10-bit tone register
-	  regs[reg] = (regs[reg] & 0x00f) | ((c & 0x3f) << 4);
+	  if (reg == 0b110) // noise?
+	    regs[reg] = c & 0x3f; // always writes the LSB
+	  else
+	    regs[reg] = (regs[reg] & 0x00f) | ((c & 0x3f) << 4);
 	} 
       }
       
@@ -856,14 +863,36 @@ void cmd_dac()
       
       // translate to our mmio FM registers
       const uint8_t ch = (reg >> 1);
-      const uint16_t vol = sn_vol_tab[regs[reg | 1]];
-      uint16_t frq = regs[reg & 0xe];
-      if (frq) frq = 3579545 / 16 / 2 / frq;
-      
-      if (verbose)
-	printf("ch: %d f: %d: vol: %d\n", ch, frq, vol);
-      //if (ch == 1) 
-      reg_dac[4 + ch] = (vol << 16) | (44100 / 2 / frq);
+      if (reg & 1) { // volume
+	uint16_t vol = sn_vol_tab[regs[reg]];
+	reg_fm16[ch * 2 + 1] = vol;
+      } else {
+	uint16_t frq = regs[reg];
+	
+	if (ch == 3) {
+	  if (verbose) printf("noise: %x", frq);
+	  uint8_t white = (frq >> 3) & 1; // periodic, or white noise?
+	  switch (frq & 0x3) {
+	  case 0: frq = 0x10; break;
+	  case 1: frq = 0x20; break;
+	  case 2: frq = 0x40; break;
+	  case 4:
+	    printf("NYI ch2 sync\n");
+	    frq = 0x30; break;
+	  };
+	  frq = 3579545 / 16 / 2 / frq; // SN to Hz
+	  frq = 16 * 44100 / 2 / frq * 4; // Hz to our samples
+	  
+	  if (verbose) printf(" > %x, %x, %d\n", frq, white);
+	  if (!white) frq |= 0x8000; // periodic noise bit
+	} else {
+	  if (frq) frq = 3579545 / 16 / 2 / frq;
+	  if (verbose) printf("ch: %d f: %d\n", ch, frq);
+	  frq = 16 * 44100 / 2 / frq;
+	}
+	//if (ch == 3)
+	reg_fm16[ch * 2] = frq;
+      }
     } else if (c == 0x61) {
       wait = (uint8_t)vgmfile[++i] + vgmfile[++i] * 256;
     } else if (c == 0x62) {
@@ -890,6 +919,13 @@ void cmd_dac()
     // update after reach command to help compensate expensive div delay?
     __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
   }
+  
+ return_silence:
+  reg_dac[0] = 0; // silence DAC
+
+  // disable all FM ops that might be left running:
+  for (uint8_t i = 0; i < 4; ++i)
+    reg_fm[i] = 0;
 }
 
 
@@ -1022,7 +1058,8 @@ void main()
 				cmd_echo();
 				break;
 			case 'd':
-				cmd_dac();
+			case 'D':
+				cmd_dac(cmd == 'D');
 				break;
 			case 'c':
 			case 'C':
