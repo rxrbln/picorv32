@@ -1,7 +1,7 @@
 /*
  *  Audio - 1 bit Delta-sigma modulation DAC
  *
-fi *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
+ *  Copyright (C) 2019-2020 René Rebe <rene@exactcode.de>
  *
  *  Permission to use, copy, modify, and/or distribute this software for any
  *  purpose with or without fee is hereby granted, provided that the above
