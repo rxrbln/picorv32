@@ -125,11 +125,11 @@ module audio (
    reg [15:0] fm2cnt = 0;
    wire signed [15:0] fm2out = fm2frq == 16'b0 ? fm2frq : fm2 ? fm2vol : -fm2vol;
 
-   reg [16:0] fm3; // 16-bit + 1 bit output Linear Feedback Shift Register
-   reg [15:0] fm3frq = 0;
+   reg [15:0] fm3; // 15-bit + 1 bit output Linear Feedback Shift Register
+   reg [15:0] fm3frq = 0; // saved ~30 LEs over 16 bit + 1 bit output
    reg [15:0] fm3vol = 0;
    reg [15:0] fm3cnt = 0;
-   wire signed [15:0] fm3out = fm3frq == 16'b0 ? fm3frq : fm3[0] ? fm3vol : 16'b0;
+   wire signed [15:0] fm3out = fm3frq[14:0] == 15'b0 ? 16'b0 : fm3[0] ? fm3vol : 16'b0;
    
  /*  
    fmop fm0 (
@@ -187,9 +187,10 @@ module audio (
 		 fm3cnt <= fm3cnt - 1;
 	       else begin
 		  // linear shift reg, output is hardwired to bit 0!
-		  fm3 <= ((fm3[4] ^ fm3[1]) << 16) | (fm3 >> 1);
-		  // NYI: different xor feedback
-		  fm3cnt <= fm3frq;
+		  fm3 <= (fm3 >> 1) |
+			 // MSB: "white noise" or more "periodic"?
+		  	 ((fm3frq[15] ? fm3[1] : (fm3[4] ^ fm3[1])) << 15);
+		  fm3cnt <= {0, fm3frq[14:0]}; // MSB are noise type ;-)
 	       end
 	       
 	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
@@ -213,7 +214,16 @@ module audio (
       end
       
       // mmio system bus interface
-      if (resetn) begin
+      if (!resetn) begin
+	 fm0cnt <= 0;
+	 fm1cnt <= 0;
+	 fm2cnt <= 0;
+	 fm3cnt <= 0;
+	 fm0frq <= 0;
+	 fm1frq <= 0;
+	 fm2frq <= 0;
+	 fm3frq <= 0;
+      end else begin
 	 ready <= 0;
 	 // when selected, wait for free DAC fifo
 	 if (sel && dacfree) begin
@@ -245,7 +255,9 @@ module audio (
 		   if (wstrb[1]) fm3frq[15: 8] <= wdata[15: 8];
 		   if (wstrb[2]) fm3vol[ 7: 0] <= wdata[23:16];
 		   if (wstrb[3]) fm3vol[15: 8] <= wdata[31:24];
-		   fm3 <= 17'h1000; // reset LFSR to only MSB set
+		   // only reset on frq write, not volume
+		   if (wstrb[0] || wstrb[1])
+		     fm3 <= 16'h8000; // reset LFSR to only 1st MSB set
 		end
 
 	      //24'h00004: // NYI: right DAC
