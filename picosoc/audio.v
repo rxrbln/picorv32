@@ -163,36 +163,37 @@ module audio (
 	    clk2 <= 0;
 	    dacbit <= dacbit + 1;
 
+	    // count FM w/ DAC bit clock for higher frequency accuracy
+	    if (fm0cnt != 0)
+	      fm0cnt = fm0cnt - 1;
+	    else begin
+	       fm0 <= ~fm0;
+	       fm0cnt <= fm0frq;
+	    end
+	    if (fm1cnt != 0)
+	      fm1cnt <= fm1cnt - 1;
+	    else begin
+	       fm1 <= ~fm1;
+	       fm1cnt <= fm1frq;
+	    end
+	    if (fm2cnt != 0)
+	      fm2cnt <= fm2cnt - 1;
+	    else begin
+	       fm2 <= ~fm2;
+	       fm2cnt <= fm2frq;
+	    end
+	    if (fm3cnt != 0)
+	      fm3cnt <= fm3cnt - 1;
+	    else begin
+	       // linear shift reg, output is hardwired to bit 0!
+	       fm3 <= (fm3 >> 1) |
+		      // MSB: "white noise" or more "periodic"?
+		      ((fm3frq[15] ? fm3[1] : (fm3[4] ^ fm3[1])) << 15);
+	       fm3cnt <= {0, fm3frq[14:0]}; // MSB are noise type ;-)
+	    end
+	    
 	    // copy fifo for next sample
 	    if (dacbit == 15) begin
-	       if (fm0cnt != 0)
-		 fm0cnt = fm0cnt - 1;
-	       else begin
-		  fm0 <= ~fm0;
-		  fm0cnt <= fm0frq;
-	       end
-	       if (fm1cnt != 0)
-		 fm1cnt <= fm1cnt - 1;
-	       else begin
-		  fm1 <= ~fm1;
-		  fm1cnt <= fm1frq;
-	       end
-	       if (fm2cnt != 0)
-		 fm2cnt <= fm2cnt - 1;
-	       else begin
-		  fm2 <= ~fm2;
-		  fm2cnt <= fm2frq;
-	       end
-	       if (fm3cnt != 0)
-		 fm3cnt <= fm3cnt - 1;
-	       else begin
-		  // linear shift reg, output is hardwired to bit 0!
-		  fm3 <= (fm3 >> 1) |
-			 // MSB: "white noise" or more "periodic"?
-		  	 ((fm3frq[15] ? fm3[1] : (fm3[4] ^ fm3[1])) << 15);
-		  fm3cnt <= {0, fm3frq[14:0]}; // MSB are noise type ;-)
-	       end
-	       
 	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
 	       dacdata <= dacnext + ((fm0out + fm1out + fm2out + fm3out) >>> 2);
 	       dacfree <= 1;
