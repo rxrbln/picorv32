@@ -104,7 +104,9 @@ module audio (
    // _| |__   /|/_
    
    // FM operators
- 
+   // TODO: waveform
+   // TODO: 1 for constant DC level
+   // TODO: envelope generator
    reg 	      fm0;
    reg [15:0] fm0frq = 0;
    reg [15:0] fm0vol = 0;
@@ -122,6 +124,12 @@ module audio (
    reg [15:0] fm2vol = 0;
    reg [15:0] fm2cnt = 0;
    wire signed [15:0] fm2out = fm2frq == 16'b0 ? fm2frq : fm2 ? fm2vol : -fm2vol;
+
+   reg [16:0] fm3; // 16-bit + 1 bit output Linear Feedback Shift Register
+   reg [15:0] fm3frq = 0;
+   reg [15:0] fm3vol = 0;
+   reg [15:0] fm3cnt = 0;
+   wire signed [15:0] fm3out = fm3frq == 16'b0 ? fm3frq : fm3[0] ? fm3vol : 16'b0;
    
  /*  
    fmop fm0 (
@@ -175,9 +183,17 @@ module audio (
 		  fm2 <= ~fm2;
 		  fm2cnt <= fm2frq;
 	       end
+	       if (fm3cnt != 0)
+		 fm3cnt <= fm3cnt - 1;
+	       else begin
+		  // linear shift reg, output is hardwired to bit 0!
+		  fm3 <= ((fm3[4] ^ fm3[1]) << 16) | (fm3 >> 1);
+		  // NYI: different xor feedback
+		  fm3cnt <= fm3frq;
+	       end
 	       
 	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
-	       dacdata <= dacnext + ((fm0out + fm1out + fm2out) >>> 2);
+	       dacdata <= dacnext + ((fm0out + fm1out + fm2out + fm3out) >>> 2);
 	       dacfree <= 1;
 	    end
 	 end
@@ -222,6 +238,14 @@ module audio (
 		   if (wstrb[1]) fm2frq[15: 8] <= wdata[15: 8];
 		   if (wstrb[2]) fm2vol[ 7: 0] <= wdata[23:16];
 		   if (wstrb[3]) fm2vol[15: 8] <= wdata[31:24];
+		end
+	      24'h0001c:
+		begin
+		   if (wstrb[0]) fm3frq[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) fm3frq[15: 8] <= wdata[15: 8];
+		   if (wstrb[2]) fm3vol[ 7: 0] <= wdata[23:16];
+		   if (wstrb[3]) fm3vol[15: 8] <= wdata[31:24];
+		   fm3 <= 17'h1000; // reset LFSR to only MSB set
 		end
 
 	      //24'h00004: // NYI: right DAC
