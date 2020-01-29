@@ -279,16 +279,13 @@ module vga(
    // text or graphic mode?
    /*localparam*/ reg textmode = 1;
    
-   reg [7:0] attr;
-   reg [7:0]   row;
-   reg [7:0]   nrow;
-   wire [7:0]   mask;
+   reg [7:0]  attr;
+   reg [7:0]  row;
+   reg [7:0]  nrow;
+   wire [7:0] mask;
    assign mask = 8'b10000000 >> xpos[2:0];
 
-   
-   reg [11:0]  faddr; // font
-
-   	    // text mode, only load every 8 pixels
+   // text mode, only load every 8 pixels
 
    reg [3:0]  col;
    wire [3:0]  fgcol;
@@ -339,8 +336,10 @@ module vga(
    reg [15:0]  cursx = 16'd80; // cursor bottom, right x/y
    reg [15:0]  cursy = 16'd70;
 
-   reg [15:0]  cursix = 16'd40; // current cursor index
-   reg [15:0]  cursiy = 16'd50;
+   wire [15:0] cursix;
+   wire [15:0] cursiy;
+   assign cursix = xpos + 16 - cursx; // 1 .. 16
+   assign cursiy = ypos + 16 - cursy;
    
    reg [11:0]  curspal0 = 12'h000; // cursor palette
    reg [11:0]  curspal1 = 12'hfff;
@@ -390,7 +389,6 @@ module vga(
 	       row <= nrow;
 	    end
 	    
-	    
 	    if (row & mask && (!blink || frame & 5'b10000)) begin
 	       col = fgcol;
 	    end else begin
@@ -425,31 +423,29 @@ module vga(
 	 endcase
 
 	 // cursor overlay
-	 cursix <= xpos + 16 - cursx; // 1 .. 16
-	 cursiy <= ypos + 16 - cursy;
 	 if (cursix && cursiy && cursix <= 16 && cursiy <= 16) begin
 	    case (cursiy)
-	      4'h1 : curs_row <= cursor0;
-	      4'h2 : curs_row <= cursor1;
-	      4'h3 : curs_row <= cursor2;
-	      4'h4 : curs_row <= cursor3;
-	      4'h5 : curs_row <= cursor4;
-	      4'h6 : curs_row <= cursor5;
-	      4'h7 : curs_row <= cursor6;
-	      4'h8 : curs_row <= cursor7;
-	      4'h9 : curs_row <= cursor8;
-	      4'ha : curs_row <= cursor9;
-	      4'hb : curs_row <= cursor10;
-	      4'hc : curs_row <= cursor11;
-	      4'hd : curs_row <= cursor12;
-	      4'he : curs_row <= cursor13;
-	      4'hf : curs_row <= cursor14;
-	      default : curs_row <= cursor15;
+	      4'h1 : curs_row = cursor0;
+	      4'h2 : curs_row = cursor1;
+	      4'h3 : curs_row = cursor2;
+	      4'h4 : curs_row = cursor3;
+	      4'h5 : curs_row = cursor4;
+	      4'h6 : curs_row = cursor5;
+	      4'h7 : curs_row = cursor6;
+	      4'h8 : curs_row = cursor7;
+	      4'h9 : curs_row = cursor8;
+	      4'ha : curs_row = cursor9;
+	      4'hb : curs_row = cursor10;
+	      4'hc : curs_row = cursor11;
+	      4'hd : curs_row = cursor12;
+	      4'he : curs_row = cursor13;
+	      4'hf : curs_row = cursor14;
+	      default : curs_row = cursor15;
 	    endcase // case (ypos - cursy)
 	    
 	    // transparent, invert, plane0, plane1?
-	    cursp0 <= curs_row[31:16] >> (16 - cursix);
-	    cursp1 <= curs_row[15:0] >> (16 - cursix);
+	    cursp0 = curs_row[31:16] >> (16 - cursix);
+	    cursp1 = curs_row[15:0] >> (16 - cursix);
 	    if (cursp0) begin
 	       if (cursp1)
 		 {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= curspal1;
@@ -465,7 +461,7 @@ module vga(
 	    {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= fb_rgb;
 	 end
 	 
-      end else begin 
+      end else begin
 	 if (xpos == frame || ypos == frame) begin
 	    //vga_rgb[23:0] <= {24'b11111111111111111111111};
 	    vid_r[7:4] <= 4'b1111;
@@ -538,16 +534,16 @@ module vga(
 		 24'h800008:
 		   begin
 		      vga_rdata <= {8'h0, curspal0};
-		      if (wstrb[0]) curspal0[ 3:0] <= wdata[ 7: 0];
-		      if (wstrb[1]) curspal0[ 7:4] <= wdata[15: 8];
-		      if (wstrb[2]) curspal0[11:8] <= wdata[23:16];
+		      if (wstrb[0]) curspal0[ 3:0] <= wdata[ 7: 4];
+		      if (wstrb[1]) curspal0[ 7:4] <= wdata[15:12];
+		      if (wstrb[2]) curspal0[11:8] <= wdata[23:20];
 		   end
 		 24'h80000c:
 		   begin
 		      vga_rdata <= {8'h0, curspal1};
-		      if (wstrb[0]) curspal1[ 3:0] <= wdata[ 7: 0];
-		      if (wstrb[1]) curspal1[ 7:4] <= wdata[15: 8];
-		      if (wstrb[2]) curspal1[11:8] <= wdata[23:16];
+		      if (wstrb[0]) curspal1[ 3:0] <= wdata[ 7: 4];
+		      if (wstrb[1]) curspal1[ 7:4] <= wdata[15:12];
+		      if (wstrb[2]) curspal1[11:8] <= wdata[23:20];
 		   end
 	       endcase
 	    end
