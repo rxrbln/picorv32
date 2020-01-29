@@ -165,10 +165,15 @@ void enable_flash_crm()
 
 // --------------------------------------------------------
 
+const int scroll = 0;
+
 void putchar(char c)
 {
-  vga_vram[vgay * 128 + vgax++] = 0x700 | c;
-
+  vga_vram[vgay * 128 + vgax++] =
+    //(c == 'E' ? 0xe200 : 0x700)
+    0x700
+    | c;
+  
   if (c == '\n') {
     reg_uart_data = '\r';
     
@@ -178,7 +183,17 @@ void putchar(char c)
     
     vgax = 0;
     ++vgay;
-    if (vgay > 30) vgay = 0;
+    if (vgay >= 30){
+      if (!scroll) {
+	vgay = 0;
+      } else {
+	// scroll
+	for (int vgay = 0; vgay < 30-1; ++vgay)
+	  for (int x = 0; x < 80; ++x)
+	    vga_vram[(vgay + 1) * 128 + x] = vga_vram[vgay * 128 + x];
+	vgay = 29;
+      }
+    }
   }
   reg_uart_data = c;
 }
@@ -198,6 +213,7 @@ int isdigit(int c) {
     return c;
   return 0;
 }
+
 
 unsigned __udivsi3(unsigned dividend, unsigned divisor)
 {
@@ -928,6 +944,14 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
+void cmd_vramread()
+{
+  printf("> %x", vga_vram[0]);
+  vga_vram[0] += 1;
+  printf(" %x", vga_vram[0]);
+  vga_vram[0] += 1;
+  printf(" %x\n", vga_vram[0]);
+}
 
 // --------------------------------------------------------
 
@@ -1056,6 +1080,9 @@ void main()
 				break;
 			case 'e':
 				cmd_echo();
+				break;
+			case 'r':
+			        cmd_vramread();
 				break;
 			case 'd':
 			case 'D':
