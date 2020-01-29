@@ -375,8 +375,8 @@ module vga(
 	       vramren <= 1;
 	    end
 	    if (!data_en || xpos[2:0] == 5) begin
-	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
 	       vramren <= 0;
+	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
 	       fontren <= 1;
 	    end
 	    if (!data_en || xpos[2:0] == 6) begin
@@ -478,44 +478,45 @@ module vga(
       vid_hs <= hsync_prev;
       vid_vs <= vsync_prev;
       vid_de <= data_en;
-   end
-
-   
-   // mmio system bus interface
-   always @(posedge clk) begin
+      
+      
+      // mmio system bus interface
       if (resetn) begin
 	 vga_ready <= 0;
 	 vramwen <= 0;
 	 fontwen <= 0;
-	 //vramren <= 0;
-	 
+	 	 
 	 if (sel) begin
 	    // must be aligned 16 bit writes, ..!
 	    if (addr < 24'h400000) begin // VRAM
-	       if (wstrb[3:0] != 4'b0) begin
+	       if (wstrb[3:0] != 4'b0) begin // write
 		  vramwen <= 1;
 		  vramwaddr <= addr[13:2];
 		  if (wstrb[0]) vramwdata[ 7: 0] <= wdata[ 7: 0];
 		  if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
-	       end
-	       vga_ready <= 1;
-	       /* end else begin
-		if (!vramren) begin
-		vramren <= 1;
-		vramraddr <= addr[7:0];
+		  vga_ready <= 1;
 	       end else begin
-		vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
-		vga_ready <= 1;
+		  // mux'ed access to be optimized!
+		  if (data_en) begin
+		     if (xpos[2:0] == 1) begin
+			vramren <= 1;
+			vramraddr <= addr[13:2];
+		     end else if (vramren && xpos[2:0] == 3) begin
+			vramren <= 0;
+			vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
+			vga_ready <= 1;
+		     end
+		  end
 	       end
-	    end	*/
+	       
 	    end else if (addr < 24'h800000) begin // FONT
 	       if (wstrb[3:0] != 4'b0) begin
 		  fontwen <= 1;
 		  fontwaddr <= addr[13:2];
 		  if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7:0];
 		  if (wstrb[1]) fontwdata[15: 8] <= wdata[15:8];
-	       end
-	       vga_ready <= 1;
+		  vga_ready <= 1;
+	       end // TODO: else read, too!
 	    end else begin
 	       vga_ready <= 1;
 	       case (addr)
