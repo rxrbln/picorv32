@@ -282,34 +282,39 @@ module vga(
    reg [7:0] attr;
    reg [7:0]   row;
    reg [7:0]   nrow;
-   reg [7:0]   mask;
+   wire [7:0]   mask;
+   assign mask = 8'b10000000 >> xpos[2:0];
+
    
-   reg [11:0]  taddr; // text
    reg [11:0]  faddr; // font
-   
-   reg [3:0]   col;
-   reg [3:0]   fgcol;
-   reg [3:0]   bgcol;
-   reg blink;
-   
-   reg [23:0]  pal0 = 24'h000000; // black
-   reg [23:0]  pal1 = 24'h0000aa; // blue
-   reg [23:0]  pal2 = 24'h00aa00; // green
-   reg [23:0]  pal3 = 24'h00aaaa; // cyan
-   reg [23:0]  pal4 = 24'haa0000; // red
-   reg [23:0]  pal5 = 24'haa00aa; // magenta
-   reg [23:0]  pal6 = 24'haaaa00; // brown !!
-   reg [23:0]  pal7 = 24'haaaaaa; // light gray
-   reg [23:0]  pal8 = 24'h555555; // "light black" / dark gray
-   reg [23:0]  pal9 = 24'h5555ff; // light blue
-   reg [23:0]  pal10 = 24'h55ff55; // light green
-   reg [23:0]  pal11 = 24'h55ffff; // light cyan
-   reg [23:0]  pal12 = 24'hff5555; // light red
-   reg [23:0]  pal13 = 24'hff55ff; // light magenta
-   reg [23:0]  pal14 = 24'hffff55; // yellow
-   reg [23:0]  pal15 = 24'hffffff; // white
-   
-   reg [23:0]  fb_rgb;
+
+   	    // text mode, only load every 8 pixels
+
+   reg [3:0]  col;
+   wire [3:0]  fgcol;
+   wire [3:0]  bgcol;
+   wire        blink;
+   assign fgcol = attr[3:0];
+   assign bgcol = attr[6:4];
+   assign blink = attr[7:7];
+
+   reg [11:0]  fb_rgb;
+   reg [11:0]  pal0 = 12'h000; // black
+   reg [11:0]  pal1 = 12'h00a; // blue
+   reg [11:0]  pal2 = 12'h0a0; // green
+   reg [11:0]  pal3 = 12'h0aa; // cyan
+   reg [11:0]  pal4 = 12'ha00; // red
+   reg [11:0]  pal5 = 12'ha0a; // magenta
+   reg [11:0]  pal6 = 12'haa0; // brown !!
+   reg [11:0]  pal7 = 12'haaa; // light gray
+   reg [11:0]  pal8 = 12'h555; // "light black" / dark gray
+   reg [11:0]  pal9 = 12'h55f; // light blue
+   reg [11:0]  pal10 = 12'h5f5; // light green
+   reg [11:0]  pal11 = 12'h5ff; // light cyan
+   reg [11:0]  pal12 = 12'hf55; // light red
+   reg [11:0]  pal13 = 12'hf5f; // light magenta
+   reg [11:0]  pal14 = 12'hff5; // yellow
+   reg [11:0]  pal15 = 12'hfff; // white
    
    //                    // mask             color
    reg [31:0]  cursor0  = 32'b10000000000000000000000000000000; // cursor planes
@@ -337,8 +342,8 @@ module vga(
    reg [15:0]  cursix = 16'd40; // current cursor index
    reg [15:0]  cursiy = 16'd50;
    
-   reg [23:0]  curspal0 = 24'h000000; // cursor palette
-   reg [23:0]  curspal1 = 24'hffffff;
+   reg [11:0]  curspal0 = 12'h000; // cursor palette
+   reg [11:0]  curspal1 = 12'hfff;
    reg cursp0;
    reg cursp1;
    
@@ -364,53 +369,34 @@ module vga(
       if (1) begin
 	 if (textmode) begin
 	    // text mode, pre-load every 8 pixels
-	    if (!data_en || xpos[2:0] == 2) begin
+	    if (!data_en || xpos[2:0] == 4) begin
 	       // load char index from vram, * 256 bytes, 128 "words"  per row
 	       // interleaved text color attribute
-	       taddr <= ((ypos & 16'hFFF0) << 3) | (data_en ? (xpos[10:3] + 1) : 0);
-	       
+	       vramraddr <= ((ypos & 16'hFFF0) << 3) | (data_en ? (xpos[10:3] + 1) : 0);
 	       vramren <= 1;
-	       vramraddr <= taddr;
-	       
-	       //nchar <= vram[taddr][7:0];
-	       //nattr <= vram[taddr][15:8];
 	    end
-	    
-	    if (!data_en || xpos[2:0] == 6) begin
-	       faddr <= (vramrdata[7:0] << 4) | ypos[3:0];
+	    if (!data_en || xpos[2:0] == 5) begin
+	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
+	       vramren <= 0;
 	       fontren <= 1;
-	       fontraddr <= faddr[11:0];
 	    end
-	    if (!data_en || xpos[2:0] == 7) begin
+	    if (!data_en || xpos[2:0] == 6) begin
 	       fontren <= 0;
 	       nrow <= fontrdata[7:0];
 	    end
-	    
-	    if (xpos[2:0] == 0) begin
+	    if (!data_en || xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       attr <= vramrdata[15:8];
 	       row <= nrow;
 	    end
 	    
-	    // text mode, only load every 8 pixels
-	    if (1) begin
-	       fgcol <= attr[3:0];
-	       bgcol <= attr[6:4];
-	       blink <= attr[7:7];
+	    
+	    if (row & mask && (!blink || frame & 5'b10000)) begin
+	       col = fgcol;
 	    end else begin
-	       fgcol <= 24'hff0000;
-	       bgcol <= 24'haaaaaa;
+	       col = bgcol;
 	    end
-
-	    begin
-	       mask <= 8'b10000000 >> xpos[2:0];
-	       if (row & mask && (!blink || frame & 5'b10000)) begin
-		  col <= fgcol;
-	       end else begin
-		  col <= bgcol;
-	       end
-	    end
-
+	    
 	 end else begin // if (textmode)
 	    // graphic mode, "double scan" 320x240 => 640x480
 	    begin
@@ -420,22 +406,22 @@ module vga(
 	 end
 	 
 	 case (col)
-	   4'h1 : fb_rgb <= pal1;
-	   4'h2 : fb_rgb <= pal2;
-	   4'h3 : fb_rgb <= pal3;
-	   4'h4 : fb_rgb <= pal4;
-	   4'h5 : fb_rgb <= pal5;
-	   4'h6 : fb_rgb <= pal6;
-	   4'h7 : fb_rgb <= pal7;
-	   4'h8 : fb_rgb <= pal8;
-	   4'h9 : fb_rgb <= pal9;
-	   4'ha : fb_rgb <= pal10;
-	   4'hb : fb_rgb <= pal11;
-	   4'hc : fb_rgb <= pal12;
-	   4'hd : fb_rgb <= pal13;
-	   4'he : fb_rgb <= pal14;
-	   4'hf : fb_rgb <= pal15;
-	   default : fb_rgb <= pal0;
+	   4'h1 : fb_rgb = pal1;
+	   4'h2 : fb_rgb = pal2;
+	   4'h3 : fb_rgb = pal3;
+	   4'h4 : fb_rgb = pal4;
+	   4'h5 : fb_rgb = pal5;
+	   4'h6 : fb_rgb = pal6;
+	   4'h7 : fb_rgb = pal7;
+	   4'h8 : fb_rgb = pal8;
+	   4'h9 : fb_rgb = pal9;
+	   4'ha : fb_rgb = pal10;
+	   4'hb : fb_rgb = pal11;
+	   4'hc : fb_rgb = pal12;
+	   4'hd : fb_rgb = pal13;
+	   4'he : fb_rgb = pal14;
+	   4'hf : fb_rgb = pal15;
+	   default : fb_rgb = pal0;
 	 endcase
 
 	 // cursor overlay
@@ -466,17 +452,17 @@ module vga(
 	    cursp1 <= curs_row[15:0] >> (16 - cursix);
 	    if (cursp0) begin
 	       if (cursp1)
-		 {vid_r, vid_g, vid_b} <= curspal1;
+		 {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= curspal1;
 	       else
-		 {vid_r, vid_g, vid_b} <= curspal0;
+		 {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= curspal0;
 	    end else begin
 	       if (cursp1) // invert / "highlight"
-		 {vid_r, vid_g, vid_b} <= ~fb_rgb; //{8'hff - fb_rgb[23:16], 8'hff - fb_rgb[15:8], 8'hff - fb_rgb[7:0]}
+		 {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= ~fb_rgb; //{8'hff - fb_rgb[23:16], 8'hff - fb_rgb[15:8], 8'hff - fb_rgb[7:0]}
 	       else
-		 {vid_r, vid_g, vid_b} <= fb_rgb;
+		 {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= fb_rgb;
 	    end
 	 end else begin
-	    {vid_r, vid_g, vid_b} <= fb_rgb;
+	    {vid_r[7:4], vid_g[7:4], vid_b[7:4]} <= fb_rgb;
 	 end
 	 
       end else begin 
@@ -530,8 +516,8 @@ module vga(
 	       if (wstrb[3:0] != 4'b0) begin
 		  fontwen <= 1;
 		  fontwaddr <= addr[13:2];
-		  if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7: 0];
-		  if (wstrb[1]) fontwdata[15: 8] <= wdata[15: 8];
+		  if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7:0];
+		  if (wstrb[1]) fontwdata[15: 8] <= wdata[15:8];
 	       end
 	       vga_ready <= 1;
 	    end else begin
@@ -540,28 +526,28 @@ module vga(
 		 24'h800000:
 		   begin
 		      vga_rdata <= {16'h0, cursx};
-		      if (wstrb[0]) cursx[7:0]  <= wdata[ 7: 0];
-		      if (wstrb[1]) cursx[15:8] <= wdata[15: 8];
+		      if (wstrb[0]) cursx[ 7:0] <= wdata[ 7:0];
+		      if (wstrb[1]) cursx[15:8] <= wdata[15:8];
 		   end
 		 24'h800004:
 		   begin
 		      vga_rdata <= {16'h0, cursy};
-		      if (wstrb[0]) cursy[7:0]  <= wdata[ 7: 0];
-		      if (wstrb[1]) cursy[15:8] <= wdata[15: 8];
+		      if (wstrb[0]) cursy[ 7:0] <= wdata[ 7:0];
+		      if (wstrb[1]) cursy[15:8] <= wdata[15:8];
 		   end
 		 24'h800008:
 		   begin
 		      vga_rdata <= {8'h0, curspal0};
-		      if (wstrb[0]) curspal0[ 7: 0] <= wdata[ 7: 0];
-		      if (wstrb[1]) curspal0[15: 8] <= wdata[15: 8];
-		      if (wstrb[2]) curspal0[23:16] <= wdata[23:16];
+		      if (wstrb[0]) curspal0[ 3:0] <= wdata[ 7: 0];
+		      if (wstrb[1]) curspal0[ 7:4] <= wdata[15: 8];
+		      if (wstrb[2]) curspal0[11:8] <= wdata[23:16];
 		   end
 		 24'h80000c:
 		   begin
 		      vga_rdata <= {8'h0, curspal1};
-		      if (wstrb[0]) curspal1[ 7: 0] <= wdata[ 7: 0];
-		      if (wstrb[1]) curspal1[15: 8] <= wdata[15: 8];
-		      if (wstrb[2]) curspal1[23:16] <= wdata[23:16];
+		      if (wstrb[0]) curspal1[ 3:0] <= wdata[ 7: 0];
+		      if (wstrb[1]) curspal1[ 7:4] <= wdata[15: 8];
+		      if (wstrb[2]) curspal1[11:8] <= wdata[23:16];
 		   end
 	       endcase
 	    end
