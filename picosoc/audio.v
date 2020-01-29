@@ -75,6 +75,7 @@ endmodule
 module audio (
    input clk, 
    output dsd,
+//   output dsd2,
    output reg word,
    output reg frame,
 
@@ -88,13 +89,21 @@ module audio (
 
    localparam [15:0] clkdiv = 18; // ~= 12MHz / 44100 / 16
    reg [15:0] clk2 = 0;
-   reg [3:0] dacbit = 0;
+   reg [3:0]  dacbit = 0;
+   
    reg [16:0] pwm = 0; // 1-bit more for overflow / carry
    reg signed [17:0] dacdata = 18'h0; // 2 overflow bits!
    reg signed [15:0] dacnext = 16'h0;
    reg 	      dacfree = 1;
-
    assign dsd = pwm[16]; // directly to overflow / carry
+
+   /*
+   reg [16:0] pwm2 = 0; // 1-bit more for overflow / carry
+   reg signed [17:0] dacdata2 = 18'h0; // 2 overflow bits!
+   reg signed [15:0] dacnext2 = 16'h0;
+   reg 	      dacfree2 = 1;
+   assign dsd2 = pwm2[16]; // directly to overflow / carry
+   */
    
    //              EG    x   PG
    //out[15:0] <= envelope * phase;
@@ -198,6 +207,13 @@ module audio (
 	       dacdata <= dacnext + ((fm0out + fm1out + fm2out + fm3out) >>> 2);
 	       dacfree <= 1;
 	    end
+/*
+	    if (dacbit == 15) begin
+	       // "mix" DAC + FM operators, Note: FM delayed 1 sample!
+	       dacdata2 <= dacnext2 + ((fm0out + fm1out + fm2out + fm3out) >>> 2);
+	       dacfree <= 1;
+	    end
+*/
 	 end
 
 	 // 1st order delta sigma accumulation
@@ -212,6 +228,15 @@ module audio (
 	   pwm <= pwm[15:0] + 16'h0000;
 	 else
 	   pwm <= pwm[15:0] + (16'h8000 + $unsigned(dacdata[15:0]) & 16'hffff);
+
+/*
+	 if (dacdata2 > $signed(18'h7fff))
+	   pwm2 <= pwm2[15:0] + 16'hffff;
+	 else if (dacdata2 < $signed(-18'h8000))
+	   pwm2 <= pwm2[15:0] + 16'h0000;
+	 else
+	   pwm2 <= pwm2[15:0] + (16'h8000 + $unsigned(dacdata2[15:0]) & 16'hffff);
+ */
       end
       
       // mmio system bus interface
@@ -260,8 +285,14 @@ module audio (
 		   if (wstrb[0] || wstrb[1])
 		     fm3 <= 16'h8000; // reset LFSR to only 1st MSB set
 		end
-
-	      //24'h00004: // NYI: right DAC
+/*
+	      24'h00004: // right DAC
+		begin
+		   if (wstrb[0]) dacnext2[ 7: 0] <= wdata[ 7: 0];
+		   if (wstrb[1]) dacnext2[15: 8] <= wdata[15: 8];
+		   dacfree2 <= 0;
+		end
+*/
 	      default: // left DAC
 		begin
 		   if (wstrb[0]) dacnext[ 7: 0] <= wdata[ 7: 0];
