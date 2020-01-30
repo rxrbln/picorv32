@@ -124,15 +124,21 @@ module vga(
    ////////////////////////////
    // video timing
    
-   wire    hsync;
    wire    vsync;
+   wire    hsync;
    wire    data_en;
+
+   wire [15:0] xpos;
+   wire [15:0] ypos;
+   
    
    video_timing video_timing_inst (
       .clk(pixclk),
       .hsync(hsync),
       .vsync(vsync),
-      .data_en(data_en)
+      .data_en(data_en),
+      .xpos(xpos),
+      .ypos(ypos),
    );
 
    ////////////////////////////
@@ -146,13 +152,10 @@ module vga(
    reg 	     vid_de;
    
    reg [8:0]   frame = 0;
-   reg [15:0]  xpos = 0;
-   reg [15:0]  ypos = 0;
    reg [18:0]  ipos = 0;
    
    reg 	       hsync_prev = 0;
    reg 	       vsync_prev = 0;
-   reg 	       hsync_pulse = 0;
    reg 	       vsync_pulse = 0;
    
    
@@ -355,13 +358,10 @@ module vga(
    always @(posedge pixclk) begin
       hsync_prev <= hsync;
       vsync_prev <= vsync;
-      hsync_pulse <= hsync & ~hsync_prev;
       vsync_pulse <= vsync & ~vsync_prev;
       
       frame <= frame + vsync_pulse;
       
-      xpos <= hsync_pulse ? 0 : xpos + data_en;
-      ypos <= vsync_pulse ? 0 : ypos + hsync_pulse;
       ipos <= vsync_pulse ? 0 : ipos + data_en;
       
       // text & graphic pixel generation
@@ -474,7 +474,8 @@ module vga(
 	    vid_b[7:4] <= xpos + ypos +frame;
 	 end
       end
-      
+
+      // output 1 clk delayed in sync w/ our pixel generation!
       vid_hs <= hsync_prev;
       vid_vs <= vsync_prev;
       vid_de <= data_en;
@@ -497,15 +498,13 @@ module vga(
 		  vga_ready <= 1;
 	       end else begin
 		  // mux'ed access to be optimized!
-		  if (data_en) begin
-		     if (xpos[2:0] == 1) begin
-			vramren <= 1;
-			vramraddr <= addr[13:2];
-		     end else if (vramren && xpos[2:0] == 3) begin
-			vramren <= 0;
-			vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
-			vga_ready <= 1;
-		     end
+		  if (data_en && xpos[2:0] == 1) begin
+		     vramren <= 1;
+		     vramraddr <= addr[13:2];
+		  end else if (data_en && vramren && xpos[2:0] == 3) begin
+		     vramren <= 0;
+		     vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
+		     vga_ready <= 1;
 		  end
 	       end
 	       
