@@ -185,12 +185,12 @@ void putchar(char c)
     ++vgay;
     if (vgay >= 30){
       if (!scroll) {
-	vgay = 0;
+	vgay = 0; // simply wrap
       } else {
 	// scroll
 	for (int vgay = 0; vgay < 30-1; ++vgay)
 	  for (int x = 0; x < 80; ++x)
-	    vga_vram[(vgay + 1) * 128 + x] = vga_vram[vgay * 128 + x];
+	    vga_vram[vgay * 128 + x] = vga_vram[(vgay + 1) * 128 + x];
 	vgay = 29;
       }
     }
