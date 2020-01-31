@@ -128,8 +128,8 @@ module vga(
    wire    hsync;
    wire    data_en;
 
-   wire [15:0] xpos;
-   wire [15:0] ypos;
+   wire signed [15:0] xpos;
+   wire signed [15:0] ypos;
    
    
    video_timing video_timing_inst (
@@ -284,7 +284,6 @@ module vga(
    
    reg [7:0]  attr;
    reg [7:0]  row;
-   reg [7:0]  nrow;
    wire [7:0] mask;
    assign mask = 8'b10000000 >> xpos[2:0];
 
@@ -354,8 +353,7 @@ module vga(
    // Video output
    // ----------------------------------------------------------------------------
    
-   
-   always @(posedge pixclk) begin
+      always @(posedge pixclk) begin
       hsync_prev <= hsync;
       vsync_prev <= vsync;
       vsync_pulse <= vsync & ~vsync_prev;
@@ -367,26 +365,21 @@ module vga(
       // text & graphic pixel generation
       if (1) begin
 	 if (textmode) begin
-	    // text mode, pre-load every 8 pixels
-	    if (!data_en || xpos[2:0] == 4) begin
-	       // load char index from vram, * 256 bytes, 128 "words"  per row
+	    // text mode: pre-load every 8 pixels
+	    if (xpos == 16'd-6 || xpos[2:0] == 1) begin
+	       // load char index from vram, * 256 bytes, 128 "words" per row
 	       // interleaved text color attribute
-	       vramraddr <= ((ypos & 16'hFFF0) << 3) | (data_en ? (xpos[10:3] + 1) : 0);
+	       vramraddr <= ((ypos & 16'hFFF0) << 3) | ((xpos[15:0] + 7) >> 3);
 	       vramren <= 1;
-	    end
-	    if (!data_en || xpos[2:0] == 5) begin
+	    end else if (xpos == 16'd-3 || xpos[2:0] == 4) begin
 	       vramren <= 0;
 	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
 	       fontren <= 1;
-	    end
-	    if (!data_en || xpos[2:0] == 6) begin
-	       fontren <= 0;
-	       nrow <= fontrdata[7:0];
-	    end
-	    if (!data_en || xpos[2:0] == 7) begin
+	    end else if (xpos == 16'd-1 || xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
+	       fontren <= 0;
 	       attr <= vramrdata[15:8];
-	       row <= nrow;
+	       row <= fontrdata[7:0];
 	    end
 	    
 	    if (row & mask && (!blink || frame & 5'b10000)) begin
