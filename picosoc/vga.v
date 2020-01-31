@@ -116,7 +116,7 @@ module vga(
 
    ////////////////////////////
    // mmio bus buffer interface
-   reg [31:0] vga_rdata;
+   reg [31:0] vga_rdata = 0;
    reg 	      vga_ready;
    assign ready = vga_ready;
    assign rdata = vga_rdata;
@@ -347,6 +347,8 @@ module vga(
    reg [11:0]  curspal1 = 12'hfff;
    reg cursp0;
    reg cursp1;
+
+   reg buffered = 0;
    
    
    // ----------------------------------------------------------------------------
@@ -363,19 +365,20 @@ module vga(
       ipos <= vsync_pulse ? 0 : ipos + data_en;
       
       // text & graphic pixel generation
-      if (1) begin
+      if (1) begin // !vsync && !hsync
 	 if (textmode) begin
 	    // text mode: pre-load every 8 pixels
-	    if (xpos == 16'd-6 || xpos[2:0] == 1) begin
+	    // simply always generate signal, even if not active
+	    if (xpos[2:0] == 3) begin
 	       // load char index from vram, * 256 bytes, 128 "words" per row
 	       // interleaved text color attribute
 	       vramraddr <= ((ypos & 16'hFFF0) << 3) | ((xpos[15:0] + 7) >> 3);
 	       vramren <= 1;
-	    end else if (xpos == 16'd-3 || xpos[2:0] == 4) begin
+	    end else if (xpos[2:0] == 5) begin
 	       vramren <= 0;
 	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
 	       fontren <= 1;
-	    end else if (xpos == 16'd-1 || xpos[2:0] == 7) begin
+	    end else if (xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       fontren <= 0;
 	       attr <= vramrdata[15:8];
@@ -479,8 +482,10 @@ module vga(
 	 vga_ready <= 0;
 	 vramwen <= 0;
 	 fontwen <= 0;
-	 	 
-	 if (sel) begin
+	 
+	 if (!sel) begin
+	    buffered <= 0;
+	 end else begin
 	    // must be aligned 16 bit writes, ..!
 	    if (addr < 24'h400000) begin // VRAM
 	       if (wstrb[3:0] != 4'b0) begin // write
@@ -490,13 +495,17 @@ module vga(
 		  if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
 		  vga_ready <= 1;
 	       end else begin
-		  // mux'ed access to be optimized!
-		  if (data_en && xpos[2:0] == 1) begin
+		  // TODO: optimized mux'ed access!
+		  if (xpos[2:0] == 0) begin
 		     vramren <= 1;
 		     vramraddr <= addr[13:2];
-		  end else if (data_en && vramren && xpos[2:0] == 3) begin
+		  end else if (vramren && xpos[2:0] == 2) begin
+		     // the riscv core runs half the clock
+		     // w/o read buffer we get some glitches
 		     vramren <= 0;
-		     vga_rdata[31:0] <= {16'b0, vramrdata[15:0]};
+		     vga_rdata[31:0] <= vramrdata[15:0];
+		     buffered <= 1;
+		  end else if (buffered) begin
 		     vga_ready <= 1;
 		  end
 	       end
