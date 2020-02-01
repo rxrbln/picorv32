@@ -30,9 +30,12 @@ module dpram (
    input [15:0] wdata,
    output reg [15:0] rdata,
 );
-   reg [15:0] mem [0:4096-1];
+   parameter INITFILE = "charset.hex";
    
-   initial $readmemh("charset.hex", mem, 0);
+   reg [15:0] mem [0:4096-1];
+
+   // xxd -p < lena-1.raw | sed "s/\(..\)\(..\)/\2\1\n/g"
+   initial $readmemh(INITFILE, mem, 0);
 
    always @(posedge clk) begin
       if (wen)
@@ -152,7 +155,7 @@ module vga(
    reg 	     vid_de;
    
    reg [8:0]   frame = 0;
-   reg [18:0]  ipos = 0;
+   reg [23:0]  ipos = 0; // linear FB counter
    
    reg 	       hsync_prev = 0;
    reg 	       vsync_prev = 0;
@@ -174,31 +177,35 @@ module vga(
    reg [11:0] vramwaddr;
    reg [11:0] vramraddr;
    
-   dpram nvram (
+   dpram #(
+      .INITFILE("320240bw.hex"),
+   ) nvram (
       .clk(pixclk),
       .ren(vramren),
       .wen(vramwen),
       .raddr(vramraddr),
       .waddr(vramwaddr),
       .rdata(vramrdata),
-      .wdata(vramwdata)
-    );
+      .wdata(vramwdata),
+   );
 
    reg 	fontwen = 0;
    reg 	fontren = 0;
    wire [15:0] fontrdata;
    reg [15:0] fontwdata;
-   reg [11:0] fontwaddr;
-   reg [11:0] fontraddr;
+   reg [10:0] fontwaddr;
+   reg [10:0] fontraddr;
    
-   dpram fontram (
+   dpram #(
+      .INITFILE("320240bw2.hex"), // "charset.hex"
+   ) fontram (
       .clk(pixclk),
       .ren(fontren),
       .wen(fontwen),
       .raddr(fontraddr),
       .waddr(fontwaddr),
       .rdata(fontrdata),
-      .wdata(fontwdata)
+      .wdata(fontwdata),
     );
 
    /*
@@ -280,10 +287,12 @@ module vga(
    */
     
    // text or graphic mode?
-   /*localparam*/ reg textmode = 1;
-   
+   /*localparam*/ reg textmode = 0;
+
+   reg [15:0] pxdata;
    reg [7:0]  attr;
    reg [7:0]  row;
+   
    wire [7:0] mask;
    assign mask = 8'b10000000 >> xpos[2:0];
 
@@ -362,13 +371,11 @@ module vga(
       
       frame <= frame + vsync_pulse;
       
-      ipos <= vsync_pulse ? 0 : ipos + data_en;
-      
       // text & graphic pixel generation
+	 // simply always generate signal, even if not active
       if (1) begin // !vsync && !hsync
 	 if (textmode) begin
 	    // text mode: pre-load every 8 pixels
-	    // simply always generate signal, even if not active
 	    if (xpos[2:0] == 3) begin
 	       // load char index from vram, * 256 bytes, 128 "words" per row
 	       // interleaved text color attribute
@@ -376,13 +383,13 @@ module vga(
 	       vramren <= 1;
 	    end else if (xpos[2:0] == 5) begin
 	       vramren <= 0;
-	       fontraddr <= (vramrdata[7:0] << 4) | ypos[3:0];
+	       fontraddr <= {vramrdata[7:0], ypos[3:0]};
 	       fontren <= 1;
 	    end else if (xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       fontren <= 0;
-	       attr <= vramrdata[15:8];
 	       row <= fontrdata[7:0];
+	       attr <= vramrdata[15:8];
 	    end
 	    
 	    if (row & mask && (!blink || frame & 5'b10000)) begin
@@ -391,11 +398,40 @@ module vga(
 	       col = bgcol;
 	    end
 	    
-	 end else begin // if (textmode)
+	 end else begin // if (!textmode)
 	    // graphic mode, "double scan" 320x240 => 640x480
-	    begin
-	       // 2x scale, 4 of 16 bits
-	       col <= 0; //vram[ipos[17:0] >> 4] >> (ipos[3:0] & 4'b1100);
+	    if (xpos == -16 && ypos == 0)
+	      ipos <= 0;
+	    else if (xpos == -16 && ypos[0])
+	      ipos <= ipos - 320; // "double scan" every 2nd line
+	    else if (data_en)
+	      ipos <= ipos + xpos[0]; // "double scan" every 2nd pixel
+	    
+	    // graphic mode: pre-load every 16 pixels
+	    if (xpos[3:0] == 13) begin
+	       // load px from vram
+	       if (!ipos[16]) begin // ipos[15:4] < 4096
+		  vramraddr <= ipos[15:4]; // 1bpp -> / 16
+		  vramren <= 1;
+	       end else begin
+		  fontraddr <= ipos[14:4]; // 1bpp -> / 16
+		  fontren <= 1;
+	       end
+	    end else if (xpos[3:0] == 15) begin
+	       // transfer pre-loaded at begin of each pixel
+	       if (!ipos[16]) begin // ipos[15:4] < 4096
+		  vramren <= 0;
+		  pxdata <= vramrdata[15:0];
+	       end else begin
+		  fontren <= 0;
+		  pxdata <= fontrdata[15:0];
+	       end
+	    end
+	    
+	    if (pxdata & (16'h8000 >> ipos[3:0])) begin
+	       col = 4'hf;
+	    end else begin
+	       col = 4'h0;
 	    end
 	 end
 	 
