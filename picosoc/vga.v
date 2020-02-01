@@ -197,7 +197,7 @@ module vga(
    reg [10:0] fontraddr;
    
    dpram #(
-      .INITFILE("320240bw2.hex"), // "charset.hex"
+      .INITFILE("charset.hex"), // "320240bw2.hex"
    ) fontram (
       .clk(pixclk),
       .ren(fontren),
@@ -287,7 +287,7 @@ module vga(
    */
     
    // text or graphic mode?
-   /*localparam*/ reg textmode = 0;
+   reg textmode = 1;
 
    reg [15:0] pxdata;
    reg [7:0]  attr;
@@ -546,7 +546,7 @@ module vga(
 		  end
 	       end
 	       
-	    end else if (addr < 24'h800000) begin // FONT
+	    end else if (addr < 24'h800000) begin // FONT // TODO: w/o gap after vram
 	       if (wstrb[3:0] != 4'b0) begin
 		  fontwen <= 1;
 		  fontwaddr <= addr[13:2];
@@ -557,7 +557,12 @@ module vga(
 	    end else begin
 	       vga_ready <= 1;
 	       case (addr)
-		 24'h800000:
+		 24'h8ffffc: // control register
+		   begin
+		      vga_rdata <= {23'h0, textmode};
+		      if (wstrb[0]) textmode <= wdata[0];
+		   end
+		 24'h800000: // hw cursor x/y
 		   begin
 		      vga_rdata <= {16'h0, cursx};
 		      if (wstrb[0]) cursx[ 7:0] <= wdata[ 7:0];
@@ -569,7 +574,7 @@ module vga(
 		      if (wstrb[0]) cursy[ 7:0] <= wdata[ 7:0];
 		      if (wstrb[1]) cursy[15:8] <= wdata[15:8];
 		   end
-		 24'h800008:
+		 24'h800008: // hw cursor palette
 		   begin
 		      vga_rdata <= {8'h0, curspal0};
 		      if (wstrb[0]) curspal0[ 3:0] <= wdata[ 7: 4];
