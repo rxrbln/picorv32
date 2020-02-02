@@ -523,38 +523,40 @@ module vga(
 	    buffered <= 0;
 	 end else begin
 	    // must be aligned 16 bit writes, ..!
-	    if (addr < 24'h400000) begin // VRAM
-	       if (wstrb[3:0] != 4'b0) begin // write
-		  vramwen <= 1;
-		  vramwaddr <= addr[13:2];
-		  if (wstrb[0]) vramwdata[ 7: 0] <= wdata[ 7: 0];
-		  if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
-		  vga_ready <= 1;
-	       end else begin
-		  // TODO: optimized mux'ed access!
-		  if (xpos[2:0] == 0) begin
-		     vramren <= 1;
-		     vramraddr <= addr[13:2];
-		  end else if (vramren && xpos[2:0] == 2) begin
-		     // the riscv core runs half the clock
-		     // w/o read buffer we get some glitches
-		     vramren <= 0;
-		     vga_rdata[31:0] <= vramrdata[15:0];
-		     buffered <= 1;
-		  end else if (buffered) begin
+	    if (!addr[23]) begin // VRAM, not CTRL registers
+	       if (addr[14]) begin
+		  //  // 2nd "bank" FONT
+		  if (wstrb[3:0] != 4'b0) begin
+		     fontwen <= 1;
+		     fontwaddr <= addr[12:2];
+		     if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7:0];
+		     if (wstrb[1]) fontwdata[15: 8] <= wdata[15:8];
 		     vga_ready <= 1;
+		  end // TODO: else read, too!
+	       end else begin // 1st "bank" VRAM
+		  if (wstrb[3:0] != 4'b0) begin // write
+		     vramwen <= 1;
+		     vramwaddr <= addr[13:2];
+		     if (wstrb[0]) vramwdata[ 7: 0] <= wdata[ 7: 0];
+		     if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
+		     vga_ready <= 1;
+		  end else begin
+		     // TODO: optimized mux'ed access!
+		     if (xpos[2:0] == 0) begin
+			vramren <= 1;
+			vramraddr <= addr[13:2];
+		     end else if (vramren && xpos[2:0] == 2) begin
+			// the riscv core runs half the clock
+			// w/o read buffer we get some glitches
+			vramren <= 0;
+			vga_rdata[31:0] <= vramrdata[15:0];
+			buffered <= 1;
+		     end else if (buffered) begin
+			vga_ready <= 1;
+		     end
 		  end
 	       end
-	       
-	    end else if (addr < 24'h800000) begin // FONT // TODO: w/o gap after vram
-	       if (wstrb[3:0] != 4'b0) begin
-		  fontwen <= 1;
-		  fontwaddr <= addr[13:2];
-		  if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7:0];
-		  if (wstrb[1]) fontwdata[15: 8] <= wdata[15:8];
-		  vga_ready <= 1;
-	       end // TODO: else read, too!
-	    end else begin
+	    end else begin // high bit set: CTRL regs
 	       vga_ready <= 1;
 	       case (addr)
 		 24'h8ffffc: // control register
