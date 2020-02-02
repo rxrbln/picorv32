@@ -43,7 +43,7 @@ extern uint32_t sram;
 #define reg_fm16 ((volatile uint16_t*)0x40000010)
 
 static uint32_t* vga_vram = (void*)0x80000000;
-static uint32_t* vga_font = (void*)0x80400000;
+static uint32_t* vga_font = (void*)0x80002000;
 
 // --------------------------------------------------------
 
@@ -165,21 +165,24 @@ void enable_flash_crm()
 
 // --------------------------------------------------------
 
-const int scroll = 0;
+uint8_t scroll = 0;
 
 void putchar(char c)
 {
+  vga_vram[0] = 0xe200 | 'R';
+  vga_vram[1] = 0x1f00 | 'X';
+  vga_vram[2] = 0x2900 | '3';
+  vga_vram[3] = 0x8500 | '2';
+  
+  if (c != '\n' && c != '\r')
   vga_vram[vgay * 128 + vgax++] =
     //(c == 'E' ? 0xe200 : 0x700)
-    0x700
+    //(vgax + 1) << 8
+    0x700 // color attribute: white on black
     | c;
   
   if (c == '\n') {
     reg_uart_data = '\r';
-    
-    // clear rest of line
-    while (vgax < 128)
-      vga_vram[vgay * 128 + vgax++] = 0;
     
     vgax = 0;
     ++vgay;
@@ -188,12 +191,19 @@ void putchar(char c)
 	vgay = 0; // simply wrap
       } else {
 	// scroll
-	for (int vgay = 0; vgay < 30-1; ++vgay)
+	for (vgay = 0; vgay < 30 - scroll; ++vgay)
 	  for (int x = 0; x < 80; ++x)
-	    vga_vram[vgay * 128 + x] = vga_vram[(vgay + 1) * 128 + x];
-	vgay = 29;
+	    vga_vram[vgay * 128 + x] = vga_vram[(vgay + scroll) * 128 + x];
+	// clear lines after curret, only for scroll > 1
+	for (int y = vgay + 1; y < 30; ++y)
+	  for (int x = 0; x < 80; ++x)
+	    vga_vram[y * 128 + x] = 0;
       }
     }
+    
+    // clear last, new line
+    for (int x = 0; x < 80; ++x)
+      vga_vram[vgay * 128 + x] = 0;
   }
   reg_uart_data = c;
 }
@@ -356,11 +366,6 @@ int vsprintf(char* out, const char* format, va_list argp)
         out += sprintf(out, "NIY: %%%c", fmt);
       }
     } else {
-#ifdef DOS
-      // TODO: only for non-binary streams, sigh!
-      if (*format == '\n')
-	*out++ = '\r';
-#endif
       *out++ = *format;
     }
 
@@ -897,7 +902,7 @@ void cmd_dac(uint8_t alt)
 	    frq = 0x30; break;
 	  };
 	  frq = 3579545 / 16 / 2 / frq; // SN to Hz
-	  frq = 16 * 44100 / 2 / frq * 4; // Hz to our samples
+	  frq = 16 * 44100 / 2 / frq * 2; // Hz to our samples
 	  
 	  if (verbose) printf(" > %x, %x, %d\n", frq, white);
 	  if (!white) frq |= 0x8000; // periodic noise bit
@@ -944,13 +949,10 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
-void cmd_vramread()
+void cmd_read_vram()
 {
-  printf("> %x", vga_vram[0]);
-  vga_vram[0] += 1;
-  printf(" %x", vga_vram[0]);
-  vga_vram[0] += 1;
-  printf(" %x\n", vga_vram[0]);
+  printf("> %x %x %x %x", vga_vram[0], vga_vram[1], vga_vram[2], vga_vram[3]);
+  printf(" - %x %x %x\n", ++vga_vram[0], ++vga_vram[0], ++vga_vram[0]);
 }
 
 // --------------------------------------------------------
@@ -1082,11 +1084,24 @@ void main()
 				cmd_echo();
 				break;
 			case 'r':
-			        cmd_vramread();
+			        cmd_read_vram();
+				break;
+			case 's':
+			        scroll ^= 2; // or 1
 				break;
 			case 'd':
 			case 'D':
 				cmd_dac(cmd == 'D');
+				break;
+			case 'g':
+			        {
+				  volatile uint32_t* vga_ctrl = (void*)0x808ffffc;
+				  *vga_ctrl ^= 1;
+				  
+				  for (int y = 0; y < 240; ++y) {
+				    vga_vram[y*320/8/2] = 0b1110001000000000;
+				  }
+				}
 				break;
 			case 'c':
 			case 'C':
