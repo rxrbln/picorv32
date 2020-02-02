@@ -31,7 +31,6 @@ module dpram (
    output reg [15:0] rdata,
 );
    parameter INITFILE = "charset.hex";
-   
    reg [15:0] mem [0:4096-1];
 
    // xxd -p < lena-1.raw | sed "s/\(..\)\(..\)/\2\1\n/g"
@@ -145,7 +144,7 @@ module vga(
    );
 
    ////////////////////////////
-   // output & test pattern
+   // RGB output
    
    reg [7:4] vid_r;
    reg [7:4] vid_g;
@@ -208,84 +207,6 @@ module vga(
       .wdata(fontwdata),
     );
 
-   /*
-   reg [15:0]  vram[0:4*1024-1]; // 8k text+attribute / frame buffer
-   initial vram[512+0] = "\001H";
-   initial vram[512+1] = "\002E";
-   initial vram[512+2] = "\003L";
-   initial vram[512+3] = "\004L";
-   initial vram[512+4] = "\005O";
-   initial vram[512+5] = "\000 ";
-   initial vram[512+6] = "\006F";
-   initial vram[512+7] = "\007P";
-   initial vram[512+8] = "\010G";
-   initial vram[512+9] = "\011A";
-   initial vram[512+10] = "\012!";
-   initial vram[512+11] = "\013 ";
-   initial vram[512+12] = "\014&";
-   initial vram[512+13] = "\015Y";
-   initial vram[512+14] = "\014T";
-   initial vram[512+15] = "\013;";
-   initial vram[512+16] = "\012-";
-   initial vram[512+17] = "\011)";
-   initial vram[512+78] = "\100X";
-   initial vram[512+77] = "\100X";
-   initial vram[512+78] = "\100Y";
-   initial vram[512+79] = "\100Z";
-
-   initial vram[128] = "\020@";
-   initial vram[129] = "\040b";
-   initial vram[130] = "\060c";
-   initial vram[131] = "\1001";
-   initial vram[132] = "\1202";
-   initial vram[133] = "\1403";
-   initial vram[134] = "\160?";
-
-   initial vram[256+0] = "\001H";
-   initial vram[256+1] = "\002E";
-   initial vram[256+2] = "\003L";
-   initial vram[256+3] = "\004L";
-   initial vram[256+4] = "\005O";
-   initial vram[256+5] = "\000 ";
-   initial vram[256+6] = "\006F";
-   initial vram[256+7] = "\007P";
-   initial vram[256+8] = "\010G";
-   initial vram[256+9] = "\011A";
-   initial vram[256+10] = "\012!";
-   initial vram[256+11] = "\013 ";
-   initial vram[256+12] = "\014&";
-   initial vram[256+13] = "\015Y";
-   initial vram[256+14] = "\014T";
-   initial vram[256+15] = "\013;";
-   initial vram[256+16] = "\012-";
-   initial vram[256+17] = "\011)";
-
-   initial vram[384+0] = "\101H";
-   initial vram[384+1] = "\102E";
-   initial vram[384+2] = "\103L";
-   initial vram[384+3] = "\104L";
-   initial vram[384+4] = "\105O";
-   initial vram[384+5] = "\100 ";
-   initial vram[384+6] = "\106F";
-   initial vram[384+7] = "\107P";
-   initial vram[384+8] = "\110G";
-   initial vram[384+9] = "\111A";
-   initial vram[384+10] = "\112!";
-   initial vram[384+11] = "\113 ";
-   initial vram[384+12] = "\114&";
-   initial vram[384+13] = "\115Y";
-   initial vram[384+14] = "\314T";
-   initial vram[384+15] = "\313;";
-   initial vram[384+16] = "\112-";
-   initial vram[384+17] = "\111)";
-
-   initial vram[128*30 - 3] = "\61A";
-   initial vram[128*30 - 2] = "\101B";
-   initial vram[128*30 - 1] = "\141C";
-   
-   initial $readmemh("vram16.hex", vram);
-   */
-    
    // text or graphic mode?
    reg textmode = 1;
 
@@ -324,7 +245,7 @@ module vga(
    reg [11:0]  pal14 = 12'hff5; // yellow
    reg [11:0]  pal15 = 12'hfff; // white
    
-   //                    // mask             color
+   //  16x16               // mask             color
    reg [31:0]  cursor0  = 32'b10000000000000000000000000000000; // cursor planes
    reg [31:0]  cursor1  = 32'b11000000000000000100000000000000;
    reg [31:0]  cursor2  = 32'b11100000000000000110000000000000;
@@ -551,6 +472,7 @@ module vga(
 			vramren <= 0;
 			vga_rdata[31:0] <= vramrdata[15:0];
 			buffered <= 1;
+			vga_ready <= 1;
 		     end else if (buffered) begin
 			vga_ready <= 1;
 		     end
