@@ -278,8 +278,9 @@ module vga(
    reg cursp0;
    reg cursp1;
 
-   reg buffered = 0;
-   
+   wire needsread = wstrb[3:0] != 4'hf;
+   wire iswrite = wstrb[3:0] != 4'h0;
+   reg 	readready = 0;
    
    // ----------------------------------------------------------------------------
    // Video output
@@ -441,41 +442,48 @@ module vga(
 	 fontwen <= 0;
 	 
 	 if (!sel) begin
-	    buffered <= 0;
+	    readready <= 0;
 	 end else begin
 	    // must be aligned 16 bit writes, ..!
 	    if (!addr[23]) begin // VRAM, not CTRL registers
 	       if (addr[14]) begin
 		  //  // 2nd "bank" FONT
-		  if (wstrb[3:0] != 4'b0) begin
-		     fontwen <= 1;
-		     fontwaddr <= addr[12:2];
-		     if (wstrb[0]) fontwdata[ 7: 0] <= wdata[ 7:0];
-		     if (wstrb[1]) fontwdata[15: 8] <= wdata[15:8];
+		  // MUX read access
+		  if (needsread && xpos[2:0] == 0) begin
+		     fontren <= 1;
+		     fontraddr <= addr[12:2];
+		  end else if (needsread && fontren && xpos[2:0] == 2) begin
+		     // the riscv core runs half the clock
+		     // w/o read buffer we get some glitches
+		     fontren <= 0;
+		     vga_rdata[15:0] <= fontrdata[15:0];
+		     readready <= 1;
+		     vga_ready <= !iswrite; // micro optimization
+		  end else if (!needsread || (needsread && readready)) begin
+		     fontwen <= iswrite;
+		     fontwaddr <= addr[13:2];
+		     fontwdata[ 7: 0] <= wstrb[0] ? wdata[ 7: 0] : fontrdata[ 7:0];
+		     fontwdata[15: 8] <= wstrb[1] ? wdata[15: 8] : fontrdata[15:8];
 		     vga_ready <= 1;
-		  end // TODO: else read, too!
+		  end
 	       end else begin // 1st "bank" VRAM
-		  if (wstrb[3:0] != 4'b0) begin // write
-		     vramwen <= 1;
+		  // MUX read access
+		  if (needsread && xpos[2:0] == 0) begin
+		     vramren <= 1;
+		     vramraddr <= addr[13:2];
+		  end else if (needsread && vramren && xpos[2:0] == 2) begin
+		     // the riscv core runs half the clock
+		     // w/o read buffer we get some glitches
+		     vramren <= 0;
+		     vga_rdata[15:0] <= vramrdata[15:0];
+		     readready <= 1;
+		     vga_ready <= !iswrite; // micro optimization
+		  end else if (!needsread || (needsread && readready)) begin
+		     vramwen <= iswrite;
 		     vramwaddr <= addr[13:2];
-		     if (wstrb[0]) vramwdata[ 7: 0] <= wdata[ 7: 0];
-		     if (wstrb[1]) vramwdata[15: 8] <= wdata[15: 8];
+		     vramwdata[ 7: 0] <= wstrb[0] ? wdata[ 7: 0] : vramrdata[ 7:0];
+		     vramwdata[15: 8] <= wstrb[1] ? wdata[15: 8] : vramrdata[15:8];
 		     vga_ready <= 1;
-		  end else begin
-		     // TODO: optimized mux'ed access!
-		     if (xpos[2:0] == 0) begin
-			vramren <= 1;
-			vramraddr <= addr[13:2];
-		     end else if (vramren && xpos[2:0] == 2) begin
-			// the riscv core runs half the clock
-			// w/o read buffer we get some glitches
-			vramren <= 0;
-			vga_rdata[31:0] <= vramrdata[15:0];
-			buffered <= 1;
-			vga_ready <= 1;
-		     end else if (buffered) begin
-			vga_ready <= 1;
-		     end
 		  end
 	       end
 	    end else begin // high bit set: CTRL regs
@@ -488,26 +496,26 @@ module vga(
 		   end
 		 24'h800000: // hw cursor x/y
 		   begin
-		      vga_rdata <= {16'h0, cursx};
+		      //vga_rdata <= {16'h0, cursx};
 		      if (wstrb[0]) cursx[ 7:0] <= wdata[ 7:0];
 		      if (wstrb[1]) cursx[15:8] <= wdata[15:8];
 		   end
 		 24'h800004:
 		   begin
-		      vga_rdata <= {16'h0, cursy};
+		      //vga_rdata <= {16'h0, cursy};
 		      if (wstrb[0]) cursy[ 7:0] <= wdata[ 7:0];
 		      if (wstrb[1]) cursy[15:8] <= wdata[15:8];
 		   end
 		 24'h800008: // hw cursor palette
 		   begin
-		      vga_rdata <= {8'h0, curspal0};
+		      //vga_rdata <= {8'h0, curspal0};
 		      if (wstrb[0]) curspal0[ 3:0] <= wdata[ 7: 4];
 		      if (wstrb[1]) curspal0[ 7:4] <= wdata[15:12];
 		      if (wstrb[2]) curspal0[11:8] <= wdata[23:20];
 		   end
 		 24'h80000c:
 		   begin
-		      vga_rdata <= {8'h0, curspal1};
+		      //vga_rdata <= {8'h0, curspal1};
 		      if (wstrb[0]) curspal1[ 3:0] <= wdata[ 7: 4];
 		      if (wstrb[1]) curspal1[ 7:4] <= wdata[15:12];
 		      if (wstrb[2]) curspal1[11:8] <= wdata[23:20];
