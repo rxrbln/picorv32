@@ -30,7 +30,7 @@ module dpram (
    input [15:0] wdata,
    output reg [15:0] rdata,
 );
-   parameter INITFILE = "charset.hex";
+   parameter INITFILE = "charset16.hex";
    reg [15:0] mem [0:4096-1];
 
    // xxd -p < lena-1.raw | sed "s/\(..\)\(..\)/\2\1\n/g"
@@ -196,7 +196,7 @@ module vga(
    reg [10:0] fontraddr;
    
    dpram #(
-      .INITFILE("charset.hex"), // "320240bw2.hex"
+      .INITFILE("charset16.hex"), // "320240bw2.hex"
    ) fontram (
       .clk(pixclk),
       .ren(fontren),
@@ -305,12 +305,12 @@ module vga(
 	       vramren <= 1;
 	    end else if (xpos[2:0] == 5) begin
 	       vramren <= 0;
-	       fontraddr <= {vramrdata[7:0], ypos[3:0]};
+	       fontraddr <= {vramrdata[7:0], ypos[3:1]};
 	       fontren <= 1;
 	    end else if (xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       fontren <= 0;
-	       row <= fontrdata[7:0];
+	       row <= ypos[0] ? fontrdata[15:8] : fontrdata[7:0];
 	       attr <= vramrdata[15:8];
 	    end
 	    
