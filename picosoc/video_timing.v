@@ -27,10 +27,11 @@ module video_timing (
     output [15:0] xpos,
     output [15:0] ypos,
 );
-
    
     ////////////////////////////
     // horizontal
+
+    // | fp | sync | bp | active |
    
     reg signed [15:0] h_cnt = 0;
     reg [3:0] 	     h_state = 8;
@@ -65,6 +66,8 @@ module video_timing (
     reg [3:0] 	     v_state = 8;
     wire [3:0] 	     v_state_next = { v_state[2:0], v_state[3] };
 
+    assign ypos = v_cnt;
+
     reg [3:0]   h_state_prev;
     wire        h_rollover =  h_state[`state_sync] & h_state_prev[`state_fp];
 
@@ -72,10 +75,6 @@ module video_timing (
         h_state_prev <= h_state;
     end
 
-    assign ypos = v_cnt;
-
-    // | fp | sync | bp | active |
-   
     always @(posedge clk) begin
        if (h_rollover) begin
 	  v_cnt <= v_cnt + 1;
