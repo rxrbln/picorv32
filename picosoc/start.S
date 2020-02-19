@@ -2,9 +2,9 @@
 
 start:
 
-# zero-initialize register file
+// zero-initialize register file
 addi x1, zero, 0
-# x2 (sp) is initialized by reset
+// x2 (sp) is initialized by reset
 addi x3, zero, 0
 addi x4, zero, 0
 addi x5, zero, 0
@@ -35,24 +35,26 @@ addi x29, zero, 0
 addi x30, zero, 0
 addi x31, zero, 0
 
-# Update LEDs
+// Update LEDs
 li a0, 0x03000000
 li a1, 1
 sw a1, 0(a0)
 
-# zero initialize entire scratchpad memory
+#ifndef ULX3S
+
+// zero initialize entire scratchpad memory
 li a0, 0x00000000
 setmemloop:
 sw a0, 0(a0)
 addi a0, a0, 4
 blt a0, sp, setmemloop
 
-# Update LEDs
+// Update LEDs
 li a0, 0x03000000
 li a1, 3
 sw a1, 0(a0)
 
-# copy data section
+// copy data section
 la a0, _sidata
 la a1, _sdata
 la a2, _edata
@@ -65,12 +67,12 @@ addi a1, a1, 4
 blt a1, a2, loop_init_data
 end_init_data:
 
-# Update LEDs
+// Update LEDs
 li a0, 0x03000000
 li a1, 7
 sw a1, 0(a0)
 
-# zero-init bss section
+// zero-init bss section
 la a0, _sbss
 la a1, _ebss
 bge a0, a1, end_init_bss
@@ -80,15 +82,19 @@ addi a0, a0, 4
 blt a0, a1, loop_init_bss
 end_init_bss:
 
-# Update LEDs
+// Update LEDs
 li a0, 0x03000000
 li a1, 15
 sw a1, 0(a0)
 
-# call main
+#endif
+
+// call main
 call main
 loop:
 j loop
+
+#ifndef ULX3S
 
 .global flashio_worker_begin
 .global flashio_worker_end
@@ -96,21 +102,21 @@ j loop
 .balign 4
 
 flashio_worker_begin:
-# a0 ... data pointer
-# a1 ... data length
-# a2 ... optional WREN cmd (0 = disable)
+// a0 ... data pointer
+// a1 ... data length
+// a2 ... optional WREN cmd (0 = disable)
 
-# address of SPI ctrl reg
+// address of SPI ctrl reg
 li   t0, 0x02000000
 
-# Set CS high, IO0 is output
+// Set CS high, IO0 is output
 li   t1, 0x120
 sh   t1, 0(t0)
 
-# Enable Manual SPI Ctrl
+// Enable Manual SPI Ctrl
 sb   zero, 3(t0)
 
-# Send optional WREN cmd
+// Send optional WREN cmd
 beqz a2, flashio_worker_L1
 li   t5, 8
 andi t2, a2, 0xff
@@ -125,7 +131,7 @@ addi t5, t5, -1
 bnez t5, flashio_worker_L4
 sb   t1, 0(t0)
 
-# SPI transfer
+// SPI transfer
 flashio_worker_L1:
 beqz a1, flashio_worker_L3
 li   t5, 8
@@ -149,7 +155,7 @@ addi a1, a1, -1
 j    flashio_worker_L1
 flashio_worker_L3:
 
-# Back to MEMIO mode
+// Back to MEMIO mode
 li   t1, 0x80
 sb   t1, 3(t0)
 
@@ -157,3 +163,5 @@ ret
 
 .balign 4
 flashio_worker_end:
+
+#endif
