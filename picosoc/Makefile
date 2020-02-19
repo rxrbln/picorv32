@@ -98,49 +98,49 @@ icebreaker_fw.bin: icebreaker_fw.elf
 
 # ---- ULX3S ECP5 Board ----
 
-ulx3sim: ulx3_tb.vvp ulx3_fw.hex
-	vvp -N $< +firmware=ulx3_fw.hex
+ulx3sim: ulx3s_tb.vvp ulx3s_fw.hex
+	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3synsim: ulx3_syn_tb.vvp ulx3_fw.hex
-	vvp -N $< +firmware=ulx3_fw.hex
+ulx3synsim: ulx3s_syn_tb.vvp ulx3s_fw.hex
+	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3.json: ulx3.v simpleuart.v $(ADDV) ../picorv32.v ulx3_fw.hex # picosoc.v
-	yosys -ql ulx3.log -p 'synth_ecp5 -top ulx3 -json ulx3.json' ulx3.v simpleuart.v $(ADDV) ../picorv32.v # $^
+ulx3s.json: ulx3s.v simpleuart.v $(ADDV) ../picorv32.v ulx3s_fw.hex # picosoc.v
+	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json' ulx3s.v simpleuart.v $(ADDV) ../picorv32.v # $^
 
-ulx3_tb.vvp: ulx3_tb.v ulx3.v ulx3_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
+ulx3s_tb.vvp: ulx3s_tb.v ulx3s.v ulx3s_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
 	iverilog -s testbench -o $@ $^ `yosys-config --datdir/ecp5/cells_sim.v`
 
-ulx3_syn_tb.vvp: ulx3_tb.v ulx3_syn.v spiflash.v
+ulx3s_syn_tb.vvp: ulx3s_tb.v ulx3s_syn.v spiflash.v
 	iverilog -s testbench -o $@ $^ `yosys-config --datdir/ecp5/cells_sim.v`
 
-ulx3_syn.v: ulx3.json ulx3_fw.hex
-	yosys -p 'read_json ulx3.json; write_verilog ulx3_syn.v'
+ulx3s_syn.v: ulx3s.json ulx3s_fw.hex
+	yosys -p 'read_json ulx3s.json; write_verilog ulx3s_syn.v'
 
-ulx3.cfg: ulx3s.lpf ulx3.json
-	nextpnr-ecp5 --freq 50 --placer heap --85k --textcfg ulx3.cfg --lpf ulx3s.lpf --json ulx3.json
+ulx3s.cfg: ulx3s.lpf ulx3s.json
+	nextpnr-ecp5 --freq 50 --placer heap --85k --textcfg ulx3s.cfg --lpf ulx3s.lpf --json ulx3s.json
 
-ulx3.bit: ulx3.cfg
-	#ecptime -d up5k -c 13 -mtr ulx3.rpt ulx3.cfg
-	ecppack ulx3.cfg --bit ulx3.bit
+ulx3s.bit: ulx3s.cfg
+	#ecptime -d up5k -c 13 -mtr ulx3s.rpt ulx3s.cfg
+	ecppack ulx3s.cfg --bit ulx3s.bit
 
-ulx3prog: ulx3.bit
-	/usr/src/f32c-ujprog/ujprog/ujprog -t ulx3.bit # -j FLASH 
-	#iceprog -o 1M ulx3_fw.bin
+ulx3sprog: ulx3s.bit
+	/usr/src/f32c-ujprog/ujprog/ujprog -t ulx3s.bit # -j FLASH 
+	#iceprog -o 1M ulx3s_fw.bin
 
-ulx3prog_fw: ulx3_fw.bin
-	echo NYI: iceprog -o 1M ulx3_fw.bin
+ulx3sprog_fw: ulx3s_fw.bin
+	echo NYI: iceprog -o 1M ulx3s_fw.bin
 
-#ulx3_sections.lds: sections.lds
-#	$(CROSS)cpp -P -DICEBREAKER -o $@ $^
+ulx3s_sections.lds: sections.lds
+	$(CROSS)cpp -P -DULX3S -o $@ $^
 
-ulx3_fw.elf: ulx3_sections.lds start.s ulxware.c
-	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -march=rv32i -Wl,-Bstatic,-T,ulx3_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3_fw.elf start2.s ulxware.c
+ulx3s_fw.elf: ulx3s_sections.lds start.s ulxware.c
+	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -march=rv32i -Wl,-Bstatic,-T,ulx3s_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_fw.elf start2.s ulxware.c
 
-ulx3_fw.hex: ulx3_fw.elf
-	$(CROSS)objcopy -O verilog ulx3_fw.elf /dev/stdout | fold -w 12 | sed '/@/d; s/\(..\) \(..\) \(..\) \(..\)/\4\3\2\1/' > ulx3_fw.hex
+ulx3s_fw.hex: ulx3s_fw.elf
+	$(CROSS)objcopy -O verilog ulx3s_fw.elf /dev/stdout | fold -w 12 | sed '/@/d; s/\(..\) \(..\) \(..\) \(..\)/\4\3\2\1/' > ulx3s_fw.hex
 
-ulx3_fw.bin: ulx3_fw.elf
-	$(CROSS)objcopy -O binary ulx3_fw.elf ulx3_fw.bin
+ulx3s_fw.bin: ulx3s_fw.elf
+	$(CROSS)objcopy -O binary ulx3s_fw.elf ulx3s_fw.bin
 
 # ---- Testbench for SPI Flash Model ----
 

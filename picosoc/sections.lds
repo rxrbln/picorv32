@@ -2,15 +2,32 @@
 #  define MEM_TOTAL 0x20000 /* 128 KB */
 #elif HX8KDEMO
 #  define MEM_TOTAL 0x200 /* 2 KB */
+#elif ULX3S
+#  define MEM_TOTAL 0xC000 /* 48 KB */
 #else
-#  error "Set -DICEBREAKER or -DHX8KDEMO when compiling firmware.c"
+#  error "Set -DICEBREAKER, -DHX8KDEMO or -DULX3S when compiling firmware.c"
 #endif
 
-MEMORY
-{
+MEMORY {
+#ifndef ULX3S
     FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0x400000 /* entire flash, 4 MiB */
+#endif
     RAM (xrw)       : ORIGIN = 0x00000000, LENGTH = MEM_TOTAL
 }
+
+#ifdef ULX3S
+
+SECTIONS {
+       .memory : {
+                . = 0x000000;
+                start*(.text);
+                *(.text);
+                *(*);
+                end = .;
+        } > mem
+}
+
+#else
 
 SECTIONS {
     /* The program code and other data goes into FLASH */
@@ -69,3 +86,5 @@ SECTIONS {
         _heap_start = .;    /* define a global symbol at heap start */
     } >RAM
 }
+
+#endif
