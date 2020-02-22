@@ -3,6 +3,7 @@ CROSS=riscv32-unknown-elf-
 CFLAGS=
 
 ADDV=video_timing.v vga.v audio.v
+HDMI2=tmds_encoder.v fake_differential.v  vga2dvid.v clk_25_250_125_25.v
 
 # ---- iCE40 HX8K Breakout Board ----
 
@@ -88,7 +89,7 @@ icebreaker_sections.lds: sections.lds
 	$(CROSS)cpp -P -DICEBREAKER -o $@ $^
 
 icebreaker_fw.elf: icebreaker_sections.lds start.S firmware.c
-	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -march=rv32im -Wl,-Bstatic,-T,icebreaker_sections.lds,--strip-debug -ffreestanding -nostdlib -o icebreaker_fw.elf start.S firmware.c
+	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -march=rv32i -Wl,-Bstatic,-T,icebreaker_sections.lds,--strip-debug -ffreestanding -nostdlib -o icebreaker_fw.elf start.S firmware.c
 
 icebreaker_fw.hex: icebreaker_fw.elf
 	$(CROSS)objcopy -O verilog icebreaker_fw.elf icebreaker_fw.hex
@@ -104,8 +105,9 @@ ulx3sim: ulx3s_tb.vvp ulx3s_fw.hex
 ulx3synsim: ulx3s_syn_tb.vvp ulx3s_fw.hex
 	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3s.json: ulx3s.v simpleuart.v $(ADDV) ../picorv32.v ulx3s_fw.hex # picosoc.v
-	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json' ulx3s.v simpleuart.v $(ADDV) ../picorv32.v # $^
+ulx3s.json: ulx3s.v sdram.v spiflash2.v simpleuart.v $(ADDV) ../picorv32.v ulx3s_fw.hex # picosoc.v
+	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json' ulx3s.v sdram.v spiflash2.v simpleuart.v \
+	$(HDMI2) $(ADDV) ../picorv32.v # $^
 
 ulx3s_tb.vvp: ulx3s_tb.v ulx3s.v ulx3s_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
 	iverilog -s testbench -o $@ $^ `yosys-config --datdir/ecp5/cells_sim.v`
