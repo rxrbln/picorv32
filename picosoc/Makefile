@@ -105,7 +105,7 @@ ulx3sim: ulx3s_tb.vvp ulx3s_fw.hex
 ulx3synsim: ulx3s_syn_tb.vvp ulx3s_fw.hex
 	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3s.json: ulx3s.v sdram.v spiflash2.v simpleuart.v $(ADDV) ../picorv32.v ulx3s_fw.hex # picosoc.v
+ulx3s.json: ulx3s.v sdram.v spiflash2.v simpleuart.v $(ADDV) ../picorv32.v # picosoc.v
 	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json' ulx3s.v sdram.v spiflash2.v simpleuart.v \
 	$(HDMI2) $(ADDV) ../picorv32.v # $^
 
@@ -125,12 +125,12 @@ ulx3s.bit: ulx3s.cfg
 	#ecptime -d up5k -c 13 -mtr ulx3s.rpt ulx3s.cfg
 	ecppack ulx3s.cfg --bit ulx3s.bit
 
-ulx3sprog: ulx3s.bit
+ulx3sprog: ulx3s.bit ulx3s_fw.img
+	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x200000 ulx3s_fw.img
 	/usr/src/f32c-ujprog/ujprog/ujprog -t ulx3s.bit # -j FLASH 
-	#iceprog -o 1M ulx3s_fw.bin
 
 ulx3sprog_fw: ulx3s_fw.bin
-	echo NYI: iceprog -o 1M ulx3s_fw.bin
+	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x200000 ulx3s_fw.img
 
 ulx3s_sections.lds: sections.lds
 	$(CROSS)cpp -P -DULX3S -o $@ $^
@@ -141,8 +141,8 @@ ulx3s_fw.elf: ulx3s_sections.lds start.S ulxware.c
 ulx3s_fw.hex: ulx3s_fw.elf
 	$(CROSS)objcopy -O verilog ulx3s_fw.elf /dev/stdout | fold -w 12 | sed '/@/d; s/\(..\) \(..\) \(..\) \(..\)/\4\3\2\1/' > ulx3s_fw.hex
 
-ulx3s_fw.bin: ulx3s_fw.elf
-	$(CROSS)objcopy -O binary ulx3s_fw.elf ulx3s_fw.bin
+ulx3s_fw.img: ulx3s_fw.elf
+	$(CROSS)objcopy -O binary ulx3s_fw.elf ulx3s_fw.img
 
 # ---- Testbench for SPI Flash Model ----
 

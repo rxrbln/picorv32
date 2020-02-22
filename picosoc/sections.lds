@@ -9,25 +9,13 @@
 #endif
 
 MEMORY {
-#ifndef ULX3S
+#ifdef ULX3S
+    FLASH (rx)      : ORIGIN = 0x00200000, LENGTH = 0x400000 /* entire flash, 4 MiB */
+#else
     FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0x400000 /* entire flash, 4 MiB */
 #endif
     RAM (xrw)       : ORIGIN = 0x00000000, LENGTH = MEM_TOTAL
 }
-
-#ifdef ULX3S
-
-SECTIONS {
-       .memory : {
-                . = 0x000000;
-                start*(.text);
-                *(.text);
-                *(*);
-                end = .;
-        } > mem
-}
-
-#else
 
 SECTIONS {
     /* The program code and other data goes into FLASH */
@@ -86,5 +74,3 @@ SECTIONS {
         _heap_start = .;    /* define a global symbol at heap start */
     } >RAM
 }
-
-#endif
