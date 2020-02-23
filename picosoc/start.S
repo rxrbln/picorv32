@@ -40,7 +40,6 @@ li a0, 0x03000000
 li a1, 1
 sw a1, 0(a0)
 
-#ifndef ULX3S
 
 // zero initialize entire scratchpad memory
 li a0, 0x00000000
@@ -87,14 +86,12 @@ li a0, 0x03000000
 li a1, 15
 sw a1, 0(a0)
 
-#endif
 
 // call main
 call main
 loop:
 j loop
 
-#ifndef ULX3S
 
 .global flashio_worker_begin
 .global flashio_worker_end
@@ -163,5 +160,3 @@ ret
 
 .balign 4
 flashio_worker_end:
-
-#endif
