@@ -26,8 +26,17 @@
 #  define MEM_TOTAL 0x20000 /* 128 KB */
 #elif HX8KDEMO
 #  define MEM_TOTAL 0x200 /* 2 KB */
+#elif ULX3S
+#  define MEM_TOTAL 0x20000 /* 128 KB */
 #else
-#  error "Set -DICEBREAKER or -DHX8KDEMO when compiling firmware.c"
+#  error "Set -DICEBREAKER, -DHX8KDEMO or -DULX3S when compiling firmware.c"
+#endif
+
+const uint32_t SYSCLK =
+#ifdef ULX3S
+  40000000;
+#else
+  12937000;
 #endif
 
 // a pointer to this is a null pointer, but the compiler does not
@@ -120,7 +129,7 @@ void set_flash_mode_qddr()
 }
 #endif
 
-#ifdef ICEBREAKER
+#if defined(ICEBREAKER) || defined(ULX3S)
 void set_flash_qspi_flag()
 {
 	uint8_t buffer[8];
@@ -169,11 +178,15 @@ uint8_t scroll = 0;
 
 void putchar(char c)
 {
-  vga_vram[0] = 0xe200 | 'R';
+  if (c == '\n')
+    reg_uart_data = '\r';
+ 
+#if 1
+  vga_vram[0] = 0x6200 | 'R';
   vga_vram[1] = 0x1f00 | 'X';
   vga_vram[2] = 0x2900 | '3';
-  vga_vram[3] = 0x8500 | '2';
-  
+  vga_vram[3] = 0x8500 | '\xfd';
+
   if (c != '\n' && c != '\r')
   vga_vram[vgay * 128 + vgax++] =
     //(c == 'E' ? 0xe200 : 0x700)
@@ -182,8 +195,6 @@ void putchar(char c)
     | c;
   
   if (c == '\n') {
-    reg_uart_data = '\r';
-    
     vgax = 0;
     ++vgay;
     if (vgay >= 30){
@@ -205,6 +216,7 @@ void putchar(char c)
     for (int x = 0; x < 80; ++x)
       vga_vram[vgay * 128 + x] = 0;
   }
+#endif
   reg_uart_data = c;
 }
 
@@ -222,6 +234,41 @@ int isdigit(int c) {
   if (c >= '0' && c <= '9')
     return c;
   return 0;
+}
+
+#ifndef __riscv_muldiv
+
+struct DWstruct {
+	int low, high;
+};
+
+typedef union {
+	struct DWstruct s;
+	long long ll;
+} DWunion;
+
+long long __ashldi3(long long u, int b)
+{
+	DWunion uu, w;
+	int bm;
+	
+	if (b == 0)
+		return u;
+
+	uu.ll = u;
+	bm = 32 - b;
+
+	if (bm <= 0) {
+		w.s.low = 0;
+		w.s.high = (unsigned int) uu.s.low << -bm;
+	} else {
+		const unsigned int carries = (unsigned int) uu.s.low >> bm;
+
+		w.s.low = (unsigned int) uu.s.low << b;
+		w.s.high = ((unsigned int) uu.s.high << b) | carries;
+	}
+
+	return w.ll;
 }
 
 
@@ -285,6 +332,7 @@ unsigned __umulsi3(unsigned a, unsigned b)
 }
 unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
 
+#endif
 
 int sprintf(char* out, const char* format, ...)
   __attribute__ ((format (printf, 2, 3)));
@@ -416,7 +464,6 @@ int printf(const char* format, ...)
 char getchar_prompt(char *prompt)
 {
 	int32_t c = -1;
-
 	uint32_t cycles_begin, cycles_now, cycles;
 	__asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
 
@@ -428,7 +475,7 @@ char getchar_prompt(char *prompt)
 	while (c == -1) {
 		__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
 		cycles = cycles_now - cycles_begin;
-		if (cycles > 12000000) {
+		if (cycles > SYSCLK / 2) {
 			if (prompt)
 				print(prompt);
 			cycles_begin = cycles_now;
@@ -553,7 +600,7 @@ void cmd_read_flash_regs()
 }
 #endif
 
-#ifdef ICEBREAKER
+#if defined(ICEBREAKER) || (ULX3S)
 uint8_t cmd_read_flash_reg(uint8_t cmd)
 {
 	uint8_t buffer[2] = {cmd, 0};
@@ -741,7 +788,7 @@ void cmd_benchmark_all()
 }
 #endif
 
-#ifdef ICEBREAKER
+#if defined(ICEBREAKER) || defined (ULX3S)
 void cmd_benchmark_all()
 {
 	uint32_t instns = 0;
@@ -806,14 +853,13 @@ const uint16_t sn_vol_tab[16] = {
   5193,  4125,  3277,  2603,  2067,  1642,  1304,     0
 };
 
-const uint32_t SYSCLK = 12937000;
 
 void cmd_dac(uint8_t alt)
 {
   print("DAC & FM/VGM testing\n");
 /*
   uint16_t c;
-#if 1 
+#if 1
   while (c = getbyte())
     reg_dac = (c << 8); // scale to 16-bit, ...
 #else
@@ -829,8 +875,10 @@ void cmd_dac(uint8_t alt)
   //reg_fm[3] = (0x8000 << 16) | (alt ? 0x8000 | 16*80: 16*d120); // fm3 noise
   
   
-  for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile); ++i)
-    reg_dac[0] = audiofile[i];
+  for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile);) {
+    reg_dac[0] = audiofile[i++]; // left
+    reg_dac[1] = audiofile[i++]; // right
+  }
   //for (int i = 0; 1; ++i) reg_dac = i & 1 ? 0xffff : 0;
   reg_dac[0] = 0; // silence DAC
   
@@ -951,8 +999,16 @@ void cmd_dac(uint8_t alt)
 
 void cmd_read_vram()
 {
-  printf("> %x %x %x %x", vga_vram[0], vga_vram[1], vga_vram[2], vga_vram[3]);
-  printf(" - %x %x %x\n", ++vga_vram[0], ++vga_vram[0], ++vga_vram[0]);
+  printf("16> %x %x %x %x", vga_vram[0], vga_vram[1], vga_vram[2], vga_vram[3]);
+  //printf(" 8> %x %x %x %x", vga_vram8[0], vga_vram8[1], vga_vram8[4+0], vga_vram[4+1]);
+
+  printf("++16> %x %x %x", ++vga_vram[0], ++vga_vram[0], ++vga_vram[0]);
+  //printf(" 8> %x %x %x %x", vga_vram8[0], vga_vram8[1], vga_vram8[4+0], vga_vram[4+1]);
+
+  //printf("\n32> %x %x %x %x", vga_vram32[0], vga_vram32[1], vga_vram32[2], vga_vram32[3]);
+  //printf(" 32++> %x %x %x %x", ++vga_vram32[0], ++vga_vram32[1], ++vga_vram32[2], ++vga_vram[3]);
+
+  printf("\n");
 }
 
 // --------------------------------------------------------
@@ -969,6 +1025,9 @@ const uint32_t jit[] = {
   0x00b55533,
   0x00050533,
   0x00008067,
+};
+
+const uint16_t fbimg[] = {
 };
 
 void main()
@@ -990,16 +1049,12 @@ void main()
 	reg_leds = 127;
 	while (getchar_prompt("Press ENTER to continue..\n") != '\r') { /* wait */ }
 	
-	print("\n");
-	print("  ____  _          ____         ____\n");
-	print(" |  _ \\(_) ___ ___/ ___|  ___  / ___|\n");
-	print(" | |_) | |/ __/ _ \\___ \\ / _ \\| |\n");
-	print(" |  __/| | (_| (_) |__) | (_) | |___\n");
-	print(" |_|   |_|\\___\\___/____/ \\___/ \\____|\n");
-	print("\n");
+	print(" ___ __   __ __   ___\n");
+	print("| _ \\\\ \\_/ /|__`.(_  |\n");
+	print("| v / > , <  |_ | / / \n");
+	print("|_|_\\/_/ \\_\\|__.'|___|\n");
+	printf(" @%dMHz MEM: %dKiB\n\n", SYSCLK / 1000000, MEM_TOTAL / 1024);
 
-	printf("Total memory: %dKiB\n\n", MEM_TOTAL / 1024);
-	
 	cmd_memtest();
 	print("\n");
 	
@@ -1013,25 +1068,17 @@ void main()
 		print("\n");
 
 		print("Select an action:\n");
-		print("\n");
-		print("   [1] Read SPI Flash ID\n");
-		print("   [2] Read SPI Config Regs\n");
-		print("   [3] Switch to default mode\n");
-		print("   [4] Switch to Dual I/O mode\n");
-		print("   [5] Switch to Quad I/O mode\n");
-		print("   [6] Switch to Quad DDR mode\n");
-		print("   [7] Toggle continuous read mode\n");
-		print("   [9] Run simplistic benchmark\n");
-		print("   [0] Benchmark all configs\n");
-		print("   [M] Run Memtest\n");
-		print("   [S] Print SPI state\n");
-		print("   [c] Move VGA cursor [d] Dac echo UART\n");
-		print("   [e] Echo UART\n");
-		print("\n");
+		print("[1] Read SPI Flash ID       [2] Read SPI Config Regs\n");
+		print("[3] Switch to default mode  [4] Switch to Dual I/O mode\n");
+		print("[5] Switch to Quad I/O mode [6] Switch to Quad DDR mode\n");
+		print("[7] Toggle continuous read mode [9] Run simplistic benchmark\n");
+		print("[0] Benchmark all configs   [M] Run Memtest\n");
+		print("[S] Print SPI state         [c] Move VGA cursor [d] Dac echo UART\n");
+		print("[e] Echo UART               [g] graphic mode test\n");
 
 		for (int rep = 10; rep > 0; rep--)
 		{
-			print("Command> ");
+			print("Cmd> ");
 			char cmd = getchar();
 			if (cmd > 32 && cmd < 127)
 				putchar(cmd);
@@ -1094,12 +1141,18 @@ void main()
 				cmd_dac(cmd == 'D');
 				break;
 			case 'g':
+			case 'G':
 			        {
 				  volatile uint32_t* vga_ctrl = (void*)0x808ffffc;
 				  *vga_ctrl ^= 1;
-				  
-				  for (int y = 0; y < 240; ++y) {
-				    vga_vram[y*320/8/2] = 0b1110001000000000;
+				  if (cmd == 'g') {
+				    for (int y = 0; y < 240; ++y)
+				      vga_vram[y*320/8/2] = 0b1110001000000000;
+				    //vga_vram8[y*320/8 * 4 + 3] = 0b11100010;
+				  } else {
+				    for (int i = 0; i < sizeof(fbimg) / sizeof(*fbimg); ++i)
+				      vga_vram[i] = fbimg[i];
+				    while (getchar_prompt(">") != '\r') { /* wait */ }
 				  }
 				}
 				break;
