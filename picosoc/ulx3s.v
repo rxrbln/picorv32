@@ -224,7 +224,7 @@ module attosoc (
 		 else
 		   iomem_rdata[15:0] <= sdram_rdata;
 	      end
-	      iomem_ready <= (sdram_cycle == 4'b1111);
+	      iomem_ready <= sdram_cycle == 4'b1111;
 	   end else if (vgamem_sel) begin
 	      iomem_ready <= vgamem_ready;
 	      iomem_rdata <= vgamem_rdata;
@@ -359,16 +359,16 @@ EHXPLLL #(
         .STDBY_ENABLE("DISABLED"),
         .DPHASE_SOURCE("DISABLED"),
         .CLKOP_FPHASE(0),
-        .CLKOP_CPHASE(3),
+        .CLKOP_CPHASE(2),
         .OUTDIVIDER_MUXA("DIVA"),
         .CLKOP_ENABLE("ENABLED"),
-        .CLKOP_DIV(7),
+        .CLKOP_DIV(6),
         .CLKOS_ENABLE("ENABLED"),
-        .CLKOS_DIV(28),
-        .CLKOS_CPHASE(3),
+        .CLKOS_DIV(24),
+        .CLKOS_CPHASE(2),
         .CLKOS_FPHASE(0),
-        .CLKFB_DIV(24),
-        .CLKI_DIV(7),
+        .CLKFB_DIV(4),
+        .CLKI_DIV(1),
         .FEEDBK_PATH("INT_OP")
     ) pll_i (
         .CLKI(clki),
