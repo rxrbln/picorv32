@@ -26,26 +26,26 @@
 // 512Mbit Single-Data-Rate SDRAM, 32Mx16 (8M x 16 x 4 Banks)
 
 module sdram (
-	input [15:0]  		sd_data_in,    // 16 bit bidirectional data bus
-	output [15:0]  		sd_data_out,    // 16 bit bidirectional data bus
+	input [15:0]  		sd_data_in, // 16 bit bidirectional data bus
+	output [15:0]  		sd_data_out,// 16 bit bidirectional data bus
 	output [12:0]		sd_addr,    // 13 bit multiplexed address bus
 	output [1:0] 		sd_dqm,     // two byte masks
 	output [1:0] 		sd_ba,      // four banks
-	output 				sd_cs,      // a single chip select
-	output 				sd_we,      // write enable
-	output 				sd_ras,     // row address select
-	output 				sd_cas,     // columns address select
+	output 			sd_cs,      // a single chip select
+	output 			sd_we,      // write enable
+	output 			sd_ras,     // row address select
+	output 			sd_cas,     // columns address select
 
 	// cpu/chipset interface
-	input 		 		init,			// init signal after FPGA config to initialize RAM
-	input 		 		clk,			// sdram is accessed at up to 166MHz
-	input					clkref,		// reference clock to sync to
+	input 		 	init,	    // init signal after FPGA config to initialize RAM
+	input 		 	clk,	    // sdram is accessed at up to 166MHz
+	input			clkref,	    // reference clock to sync to
 
         input [24:0]   	addr,       // 25 bit byte address
-	input 		 		we,         // cpu/chipset requests write
+	input 		 	we,         // cpu/chipset requests write
 	input [1:0]     dqm,        // data byte write mask
-	input [15:0]  		din,			// data input from chipset/cpu
-	input 		 		oeA,        // cpu requests data
+	input [15:0]  		din,	   // data input from chipset/cpu
+	input 		 	oeA,       // cpu requests data
 	output reg [15:0]  doutA,	   // data output to cpu
 );
 
@@ -144,17 +144,15 @@ wire [3:0] run_cmd =
 	(!we && !oe && (q == STATE_CMD_START)) ? CMD_AUTO_REFRESH :
 	CMD_INHIBIT;
 	
-assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
-
 wire [12:0] reset_addr = reset == 13 ? 13'b0010000000000 : MODE;
-	
+// 8192 x 1024 x 16 x 4 banks
 wire [12:0] run_addr =
-	q == STATE_CMD_START ? addr[21:9] : {4'b0010, addr[24], addr[8:1]};
+	q == STATE_CMD_START ? addr[22:10] : // RA0-RA12: Row address
+	    {4'b0010, addr[9:1]}; // CA0-CA9: Column address
 
+assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
 assign sd_addr = reset != 0 ? reset_addr : run_addr;
-
-assign sd_ba = addr[23:22];
-
+assign sd_ba = addr[24:23];
 assign sd_dqm = we ? ~dqm : 2'b00;
 
 endmodule
