@@ -5,20 +5,21 @@
 // of Luddes NES core
 // http://code.google.com/p/mist-board/
 // 
-// Copyright (c) 2013 Till Harbaum <till@harbaum.org> 
+// Copyright (c) 2020 René Rebe <rene@exactcode.de>
+// Copyright (c) 2013 Till Harbaum <till@harbaum.org>
 // 
-// This source file is free software: you can redistribute it and/or modify 
-// it under the terms of the GNU General Public License as published 
-// by the Free Software Foundation, either version 3 of the License, or 
-// (at your option) any later version. 
+// This source file is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
 // 
 // This source file is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of 
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 // 
-// You should have received a copy of the GNU General Public License 
-// along with this program.  If not, see <http://www.gnu.org/licenses/>. 
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
 // interface to AS4C32M16SA (or MT48LC32M16),
@@ -39,14 +40,13 @@ module sdram (
 	input 		 		init,			// init signal after FPGA config to initialize RAM
 	input 		 		clk,			// sdram is accessed at up to 166MHz
 	input					clkref,		// reference clock to sync to
-	
-	input [24:0]   	addr,       // 25 bit byte address
+
+        input [24:0]   	addr,       // 25 bit byte address
 	input 		 		we,         // cpu/chipset requests write
-	input [3:0]     dqm, // data byte enable
+	input [1:0]     dqm,        // data byte write mask
 	input [15:0]  		din,			// data input from chipset/cpu
 	input 		 		oeA,        // cpu requests data
 	output reg [15:0]  doutA,	   // data output to cpu
-	      //output reg ready, // cmd ready
 );
 
 // no burst configured
@@ -57,7 +57,7 @@ localparam CAS_LATENCY    = 3'd3;   // 2/3 allowed
 localparam OP_MODE        = 2'b00;  // only 00 (standard operation) allowed
 localparam NO_WRITE_BURST = 1'b1;   // 0= write burst enabled, 1=only single access write
 
-localparam MODE = { 3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, BURST_LENGTH}; 
+localparam MODE = {3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, BURST_LENGTH};
 
 
 // ---------------------------------------------------------------------
@@ -75,9 +75,9 @@ always @(posedge clk) begin
    // SDRAM (state machine) clock is 86MHz. Synchronize this to systems 21.477 Mhz clock
    // force counter to pass state LAST->FIRST exactly after the rising edge of clkref
    if (((q == STATE_LAST) && (clkref == 1)) ||
-       ((q == STATE_FIRST) && (clkref == 0)) ||
-       ((q != STATE_LAST) && (q != STATE_FIRST)))
-     q <= q + 3'd1;
+		((q == STATE_FIRST) && (clkref == 0)) ||
+      ((q != STATE_LAST) && (q != STATE_FIRST)))
+			q <= q + 3'd1;
 end
 
 // ---------------------------------------------------------------------
@@ -116,22 +116,23 @@ assign sd_ras = sd_cmd[2];
 assign sd_cas = sd_cmd[1];
 assign sd_we  = sd_cmd[0];
 
-// drive ram data lines when writing
-assign sd_data_out = din;
+// drive ram data lines when writing, set them as inputs otherwise
+// the eight bits are sent on both bytes ports. Which one's actually
+// written depends on the state of dqm of which only one is active
+// at a time when writing
+assign sd_data_out = we ? din : 16'b0;
+
 wire oe = oeA;
 
 wire [15:0] dout = sd_data_in[15:0];
 
 always @(posedge clk) begin
-   if (q == STATE_CMD_READ) begin
-      if (oeA) doutA <= dout;
-/*      ready <= 1;
-   end else if (q == STATE_CMD_LAST)
-     ready <= 0;*/
-   end
+	if (q == STATE_CMD_READ) begin
+		if (oeA) doutA <= dout;
+	end
 end
 
-wire [3:0] reset_cmd = 
+wire [3:0] reset_cmd =
 	((q == STATE_CMD_START) && (reset == 13)) ? CMD_PRECHARGE :
 	((q == STATE_CMD_START) && (reset ==  2)) ? CMD_LOAD_MODE :
 	CMD_INHIBIT;
@@ -145,13 +146,15 @@ wire [3:0] run_cmd =
 	
 assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
 
-wire [12:0] reset_addr = (reset == 13) ? 13'b0010000000000 : MODE;
+wire [12:0] reset_addr = reset == 13 ? 13'b0010000000000 : MODE;
 	
-wire [12:0] run_addr = 
-	(q == STATE_CMD_START) ? addr[21:9] : { 4'b0010, addr[24], addr[8:1]};
+wire [12:0] run_addr =
+	q == STATE_CMD_START ? addr[21:9] : {4'b0010, addr[24], addr[8:1]};
 
 assign sd_addr = reset != 0 ? reset_addr : run_addr;
+
 assign sd_ba = addr[23:22];
-assign sd_dqm = we ? dqm[1:0] : 2'b00;
+
+assign sd_dqm = we ? ~dqm : 2'b00;
 
 endmodule
