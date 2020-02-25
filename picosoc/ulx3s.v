@@ -25,7 +25,7 @@
 `define PICORV32_REGS picosoc_regs
 
 module attosoc (
-	input clk, clk_25mhz,
+	input clk, clk_25mhz, clk_mem,
 	output reg [7:0] led,
 	output uart_tx,
        	input uart_rx,
@@ -33,20 +33,25 @@ module attosoc (
 	output [3:0] audio_r,
 	output [3:0] gpdi_dp, gpdi_dn,
 
+	// SPI flash
 	input flash_sck,
 	output flash_csn,
-	output flash_io0_oe,
-	output flash_io1_oe,
-	output flash_io2_oe,
-	output flash_io3_oe,
-	output flash_io0_do,
-	output flash_io1_do,
-	output flash_io2_do,
-	output flash_io3_do,
-	input  flash_io0_di,
-	input  flash_io1_di,
-	input  flash_io2_di,
-	input  flash_io3_di,
+	output flash_mosi,
+	input  flash_miso,
+	output flash_wpn,
+	output flash_holdn,
+
+	// sd memory
+	output sdram_csn,       // chip select
+	output sdram_clk,       // clock to SDRAM
+	output sdram_cke,       // clock enable to SDRAM
+	output sdram_rasn,      // SDRAM RAS
+	output sdram_casn,      // SDRAM CAS
+	output sdram_wen,       // SDRAM write-enable
+	output [12:0] sdram_a,  // SDRAM address bus
+	output [1:0] sdram_ba,  // SDRAM bank-address
+	output [1:0] sdram_dqm, // byte select
+	inout [15:0] sdram_d,   // data bus to/from SDRAM
 );
    	reg [5:0] reset_cnt = 0;
 	wire resetn = &reset_cnt;
@@ -74,7 +79,7 @@ module attosoc (
 
    	wire dac_sel = iomem_valid && iomem_addr[30]; // 2nd MSB
         wire dac_ready;
-   
+
 	always @(posedge clk)
           begin
 	     ram_ready <= mem_valid && !mem_ready && mem_addr < 4*MEM_WORDS;
@@ -87,7 +92,6 @@ module attosoc (
 		end
         end
 
- 
 	wire iomem_valid;
 	reg iomem_ready;
 	wire [31:0] iomem_addr;
@@ -103,20 +107,64 @@ module attosoc (
         wire       spimem_ready;
         wire [31:0] spimem_rdata;
 
-        /*
-        flashmem flash_i (
-           .clk(clk),
-           .reset(!resetn),
-           .valid(mem_valid && mem_addr >= 4*MEM_WORDS && mem_addr < 32'h 0200_0000),
-           .addr(mem_addr[23:0]),
-           .ready(spimem_ready),
-           .rdata(spimem_rdata),
-	   
-           .spi_cs(flash_csn),
-           .spi_sclk(flash_sck),
-           .spi_mosi(flash_mosi),
-           .spi_miso(flash_miso),
-        );*/
+
+        // sdram bi-directional output-enable
+        wire [15:0] sd_data_in;
+        wire [15:0] sd_data_out;
+        TRELLIS_IO #(.DIR("BIDIR"))
+        sdio_tristate[15:0] (
+          .B(sdram_d),
+          .I(sd_data_out),
+          .O(sd_data_in),
+          .T(!sdram_wen)
+       );
+
+   assign sdram_cke = 1'b1;
+   assign sdram_clk = clk_mem;
+   wire sdram_sel = iomem_valid && iomem_addr[29]; // 3rd MSB for a test
+   wire [15:0] sdram_rdata;
+
+   reg[3:0]  sdram_cycle = 0;
+   wire sdram_write = sdram_sel && (mem_wstrb != 4'b0);
+   wire sdram_read = sdram_sel && !sdram_write;
+   
+   sdram sdram(
+    // physical interface
+    .sd_data_in(sd_data_in),
+    .sd_data_out(sd_data_out),
+    .sd_addr(sdram_a),
+    .sd_dqm(sdram_dqm),
+    .sd_cs(sdram_csn),
+    .sd_ba(sdram_ba),
+    .sd_we(sdram_wen),
+    .sd_ras(sdram_rasn),
+    .sd_cas(sdram_casn),
+    // system interface
+    .clk(clk_mem),
+    .clkref(clk),
+    .init(!resetn),
+    // cpu/chipset interface
+    .addr(mem_addr | (sdram_cycle[3] ? 2 : 0)),
+    .we(sdram_write),
+    .dqm(sdram_cycle[3] ? mem_wstrb[3:2] : mem_wstrb[1:0]),
+    .din(sdram_cycle[3] ? mem_wdata[31:16] : mem_wdata[15:0]),
+    .oeA(sdram_read),
+    .doutA(sdram_rdata),
+  );
+
+
+       // flash quad-SPI bi-directional output-enable
+       wire flash_io0_oe, flash_io0_do, flash_io0_di;
+       wire flash_io1_oe, flash_io1_do, flash_io1_di;
+       wire flash_io2_oe, flash_io2_do, flash_io2_di;
+       wire flash_io3_oe, flash_io3_do, flash_io3_di;
+
+       TRELLIS_IO #(.DIR("BIDIR"))
+       flash_io_buffer0 [3:0] (
+          .B({flash_mosi, flash_miso, flash_wpn, flash_holdn}),
+          .I({flash_io0_do, flash_io1_do, flash_io2_do, flash_io3_do}),
+          .O({flash_io0_di, flash_io1_di, flash_io2_di, flash_io3_di}),
+          .T({!flash_io0_oe, !flash_io1_oe, !flash_io2_oe, !flash_io3_oe}));
 
    	spimemio spimemio (
 		.clk    (clk),
@@ -159,12 +207,24 @@ module attosoc (
 	wire [31:0] simpleuart_reg_dat_do;
 	wire simpleuart_reg_dat_wait;
 
-	always @(posedge clk) begin
+   
+        always @(posedge clk) begin
 	   iomem_ready <= 1'b0;
+	   sdram_cycle <= 0;
+	   
 	   if (iomem_valid && mem_addr == 32'h 03000000) begin
 	      if (iomem_wstrb[0]) led <= iomem_wdata[7:0];
 	      iomem_ready <= 1'b1;
 	      iomem_rdata <= led;
+	   end else if (sdram_sel) begin
+	      sdram_cycle <= sdram_cycle + 1;
+	      if (sdram_read && sdram_cycle[2:0] == 3'b111) begin
+		 if (sdram_cycle[3])
+		   iomem_rdata[31:16] <= sdram_rdata;
+		 else
+		   iomem_rdata[15:0] <= sdram_rdata;
+	      end
+	      iomem_ready <= (sdram_cycle == 4'b1111);
 	   end else if (vgamem_sel) begin
 	      iomem_ready <= vgamem_ready;
 	      iomem_rdata <= vgamem_rdata;
@@ -228,10 +288,9 @@ module attosoc (
 		.reg_dat_wait(simpleuart_reg_dat_wait),
 			       );
    
-   wire dsd, dsd2;
-   assign audio_l = {dsd, 3'b0};
-   assign audio_r = {dsd2, 3'b0};
-
+        wire dsd, dsd2;
+        assign audio_l = {dsd, 3'b0};
+        assign audio_r = {dsd2, 3'b0};
         audio audio (.clk(clk),
 		     .dsd(dsd), .dsd2(dsd2),
 		     .resetn(resetn),
@@ -245,7 +304,6 @@ module attosoc (
       	reg vgamem_ready;
    	wire vgamem_sel = iomem_valid && iomem_addr[31]; // high bit set
 	reg [31:0] vgamem_rdata;
-
         // vga core
         vga vga (
 		 .clk(clk_25mhz),
@@ -261,7 +319,6 @@ module attosoc (
 		.wdata  (iomem_wdata),
 		.rdata  (vgamem_rdata),
 	);
-
 
 endmodule
 
@@ -286,8 +343,9 @@ module picosoc_regs (
 	assign rdata2 = regs[raddr2[4:0]];
 endmodule
 
- // 40 MHz
-module pll(input clki,
+// xxx MHz system memory clock
+module pll(input clki, 
+    output clks1,
     output locked,
     output clko
 );
@@ -301,18 +359,23 @@ EHXPLLL #(
         .STDBY_ENABLE("DISABLED"),
         .DPHASE_SOURCE("DISABLED"),
         .CLKOP_FPHASE(0),
-        .CLKOP_CPHASE(7),
+        .CLKOP_CPHASE(3),
         .OUTDIVIDER_MUXA("DIVA"),
         .CLKOP_ENABLE("ENABLED"),
-        .CLKOP_DIV(15),
-        .CLKFB_DIV(8),
-        .CLKI_DIV(5),
+        .CLKOP_DIV(7),
+        .CLKOS_ENABLE("ENABLED"),
+        .CLKOS_DIV(28),
+        .CLKOS_CPHASE(3),
+        .CLKOS_FPHASE(0),
+        .CLKFB_DIV(24),
+        .CLKI_DIV(7),
         .FEEDBK_PATH("INT_OP")
     ) pll_i (
         .CLKI(clki),
         .CLKFB(clkfb),
         .CLKINTFB(clkfb),
         .CLKOP(clkop),
+        .CLKOS(clks1),
         .RST(1'b0),
         .STDBY(1'b0),
         .PHASESEL0(1'b0),
@@ -326,6 +389,7 @@ EHXPLLL #(
 assign clko = clkop;
 endmodule
 
+
 module ulx3s(
     input clk_25mhz,
     output [7:0] led,
@@ -333,46 +397,52 @@ module ulx3s(
     input ftdi_txd,
     output wifi_gpio0,
 
+    // SPI flash
     output flash_csn,
     output flash_mosi,
     input flash_miso,
     output flash_wpn,
     output flash_holdn,
 
+    // analog audio
     output [3:0] audio_l,
     output [3:0] audio_r,
-    
+
+    // not-HDMI
     output [3:0] gpdi_dp, gpdi_dn,
+
+    // sdram
+    output sdram_csn,       // chip select
+    output sdram_clk,       // clock to SDRAM
+    output sdram_cke,       // clock enable to SDRAM
+    output sdram_rasn,      // SDRAM RAS
+    output sdram_casn,      // SDRAM CAS
+    output sdram_wen,       // SDRAM write-enable
+    output [12:0] sdram_a,  // SDRAM address bus
+    output [1:0] sdram_ba,  // SDRAM bank-address
+    output [1:0] sdram_dqm, // byte select
+    inout [15:0] sdram_d,   // data bus to/from SDRAM
 );
    
    assign wifi_gpio0 = 1'b1;
 
-wire clk;
-pll pll(
-    .clki(clk_25mhz),
-    .clko(clk)
-);
-
-
-  wire flash_sck;
-  wire tristate = 1'b0;
-  USRMCLK u1 (.USRMCLKI(flash_sck), .USRMCLKTS(tristate));
-
-
-   wire flash_io0_oe, flash_io0_do, flash_io0_di;
-   wire flash_io1_oe, flash_io1_do, flash_io1_di;
-   wire flash_io2_oe, flash_io2_do, flash_io2_di;
-   wire flash_io3_oe, flash_io3_do, flash_io3_di;
-
-   TRELLIS_IO #(.DIR("BIDIR"))
-   flash_io_buffer0 [3:0] (
-      .B({flash_mosi, flash_miso, flash_wpn, flash_holdn}),
-      .I({flash_io0_do, flash_io1_do, flash_io2_do, flash_io3_do}),
-      .O({flash_io0_di, flash_io1_di, flash_io2_di, flash_io3_di}),
-      .T({!flash_io0_oe, !flash_io1_oe, !flash_io2_oe, !flash_io3_oe}));
+   wire sysclk; // higher system clock
+   wire clk;
    
+   pll pll(
+    .clki(clk_25mhz),
+    .clko(sysclk),
+    .clks1(clk),
+   );
+   
+   // flash SPI clock
+   wire flash_sck;
+   wire tristate = 1'b0;
+   USRMCLK u1 (.USRMCLKI(flash_sck), .USRMCLKTS(tristate));
+
 attosoc soc(
     .clk(clk),
+    .clk_mem(sysclk),
     .clk_25mhz(clk_25mhz),
     .led(led),
     
@@ -387,22 +457,22 @@ attosoc soc(
 
     .flash_csn(flash_csn),
     .flash_sck(flash_sck),
-//    .flash_mosi(flash_mosi),
-//    .flash_miso(flash_miso),
-    .flash_io0_oe (flash_io0_oe),
-    .flash_io1_oe (flash_io1_oe),
-    .flash_io2_oe (flash_io2_oe),
-    .flash_io3_oe (flash_io3_oe),
-    
-    .flash_io0_do (flash_io0_do),
-    .flash_io1_do (flash_io1_do),
-    .flash_io2_do (flash_io2_do),
-    .flash_io3_do (flash_io3_do),
+    .flash_mosi(flash_mosi),
+    .flash_miso(flash_miso),
+    .flash_holdn(flash_holdn),
+    .flash_wpn(flash_wpn),
 
-    .flash_io0_di (flash_io0_di),
-    .flash_io1_di (flash_io1_di),
-    .flash_io2_di (flash_io2_di),
-    .flash_io3_di (flash_io3_di),
+    .sdram_csn(sdram_csn),
+    .sdram_clk(sdram_clk),
+    .sdram_cke(sdram_cke),
+    .sdram_rasn(sdram_rasn),
+    .sdram_casn(sdram_casn),
+    .sdram_wen(sdram_wen),
+    .sdram_a(sdram_a),
+    .sdram_ba(sdram_ba),
+    .sdram_dqm(sdram_dqm),
+    .sdram_d(sdram_d),
 );
+
 endmodule
 
