@@ -107,7 +107,6 @@ module attosoc (
         wire       spimem_ready;
         wire [31:0] spimem_rdata;
 
-
         // sdram bi-directional output-enable
         wire [15:0] sd_data_in;
         wire [15:0] sd_data_out;
@@ -122,11 +121,11 @@ module attosoc (
    assign sdram_cke = 1'b1;
    assign sdram_clk = clk_mem;
    wire sdram_sel = iomem_valid && iomem_addr[29]; // 3rd MSB for a test
-   wire [15:0] sdram_rdata;
+   wire [31:0] sdram_rdata;
 
-   reg[3:0]  sdram_cycle = 0;
    wire sdram_write = sdram_sel && (mem_wstrb != 4'b0);
    wire sdram_read = sdram_sel && !sdram_write;
+   wire sdram_ready;
    
    sdram sdram(
     // physical interface
@@ -144,12 +143,13 @@ module attosoc (
     .clkref(clk),
     .init(!resetn),
     // cpu/chipset interface
-    .addr(mem_addr | (sdram_cycle[3] ? 2 : 0)),
+    .addr(mem_addr),
     .we(sdram_write),
-    .dqm(sdram_cycle[3] ? mem_wstrb[3:2] : mem_wstrb[1:0]),
-    .din(sdram_cycle[3] ? mem_wdata[31:16] : mem_wdata[15:0]),
+    .dqm(mem_wstrb),
+    .din(mem_wdata),
     .oeA(sdram_read),
     .doutA(sdram_rdata),
+    .ready(sdram_ready),
   );
 
 
@@ -210,21 +210,17 @@ module attosoc (
    
         always @(posedge clk) begin
 	   iomem_ready <= 1'b0;
-	   sdram_cycle <= 0;
 	   
 	   if (iomem_valid && mem_addr == 32'h 03000000) begin
 	      if (iomem_wstrb[0]) led <= iomem_wdata[7:0];
 	      iomem_ready <= 1'b1;
 	      iomem_rdata <= led;
 	   end else if (sdram_sel) begin
-	      sdram_cycle <= sdram_cycle + 1;
-	      if (sdram_read && sdram_cycle[2:0] == 3'b111) begin
-		 if (sdram_cycle[3])
-		   iomem_rdata[31:16] <= sdram_rdata;
-		 else
-		   iomem_rdata[15:0] <= sdram_rdata;
+	      if (sdram_ready) begin
+		 if (sdram_read)
+		   iomem_rdata <= sdram_rdata;
+		 iomem_ready <= 1;
 	      end
-	      iomem_ready <= sdram_cycle == 4'b1111;
 	   end else if (vgamem_sel) begin
 	      iomem_ready <= vgamem_ready;
 	      iomem_rdata <= vgamem_rdata;
@@ -269,7 +265,7 @@ module attosoc (
 		.mem_rdata   (mem_rdata  ),
 	);
 
-
+   
 	simpleuart simpleuart (
 		.clk         (clk         ),
 		.resetn      (resetn      ),
@@ -359,16 +355,16 @@ EHXPLLL #(
         .STDBY_ENABLE("DISABLED"),
         .DPHASE_SOURCE("DISABLED"),
         .CLKOP_FPHASE(0),
-        .CLKOP_CPHASE(2),
+        .CLKOP_CPHASE(3),
         .OUTDIVIDER_MUXA("DIVA"),
         .CLKOP_ENABLE("ENABLED"),
-        .CLKOP_DIV(6),
+        .CLKOP_DIV(7),
         .CLKOS_ENABLE("ENABLED"),
-        .CLKOS_DIV(24),
-        .CLKOS_CPHASE(2),
+        .CLKOS_DIV(14),
+        .CLKOS_CPHASE(3),
         .CLKOS_FPHASE(0),
-        .CLKFB_DIV(4),
-        .CLKI_DIV(1),
+        .CLKFB_DIV(18),
+        .CLKI_DIV(5),
         .FEEDBK_PATH("INT_OP")
     ) pll_i (
         .CLKI(clki),
