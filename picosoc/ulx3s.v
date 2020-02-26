@@ -145,10 +145,10 @@ module attosoc (
     // cpu/chipset interface
     .addr(mem_addr),
     .we(sdram_write),
-    .dqm(mem_wstrb),
+    .dqm(~mem_wstrb),
     .din(mem_wdata),
     .oeA(sdram_read),
-    .doutA(sdram_rdata),
+    .dout(sdram_rdata),
     .ready(sdram_ready),
   );
 
@@ -339,7 +339,7 @@ module picosoc_regs (
 	assign rdata2 = regs[raddr2[4:0]];
 endmodule
 
-// xxx MHz system memory clock
+// 85 MHz system memory clock
 module pll(input clki, 
     output clks1,
     output locked,
@@ -363,8 +363,8 @@ EHXPLLL #(
         .CLKOS_DIV(14),
         .CLKOS_CPHASE(3),
         .CLKOS_FPHASE(0),
-        .CLKFB_DIV(18),
-        .CLKI_DIV(5),
+        .CLKFB_DIV(10),
+        .CLKI_DIV(3),
         .FEEDBK_PATH("INT_OP")
     ) pll_i (
         .CLKI(clki),
