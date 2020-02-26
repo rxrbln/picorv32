@@ -43,11 +43,13 @@ module sdram (
 
         input [24:0]   	addr,       // 25 bit byte address
 	input 		 	we,         // cpu/chipset requests write
-	input [1:0]     dqm,        // data byte write mask
-	input [15:0]  		din,	   // data input from chipset/cpu
+	input [3:0]     dqm,        // data byte write mask
+	input [31:0]  		din,	   // data input from chipset/cpu
 	input 		 	oeA,       // cpu requests data
-	output reg [15:0]  doutA,	   // data output to cpu
+	output reg [31:0]  doutA,	   // data output to cpu
+	output reg ready,
 );
+      
 
 // no burst configured
 localparam RASCAS_DELAY   = 3'd3;   // tRCD=20ns -> 3 cycles@128MHz
@@ -66,8 +68,9 @@ localparam MODE = {3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, BU
 
 localparam STATE_FIRST     = 4'd0;   // first state in cycle
 localparam STATE_CMD_START = 4'd1;   // state in which a new command can be started
-localparam STATE_CMD_CONT  = STATE_CMD_START  + RASCAS_DELAY; // 4 command can be continued
-localparam STATE_CMD_READ  = 4'd7;   // read state
+localparam STATE_CMD_CONT  = STATE_CMD_START + RASCAS_DELAY; // command can be continued
+localparam STATE_CMD_RW    = STATE_CMD_CONT + CAS_LATENCY;   // read/write state
+localparam STATE_CMD_RW2   = STATE_CMD_RW + 1;   // read/write state
 localparam STATE_LAST      = 4'd15;  // last state in cycle
 
 reg [3:0] q = STATE_FIRST;
@@ -75,16 +78,16 @@ always @(posedge clk) begin
    // SDRAM (state machine) clock is 86MHz. Synchronize this to systems 21.477 Mhz clock
    // force counter to pass state LAST->FIRST exactly after the rising edge of clkref
    if (((q == STATE_LAST) && (clkref == 1)) ||
-		((q == STATE_FIRST) && (clkref == 0)) ||
-      ((q != STATE_LAST) && (q != STATE_FIRST)))
-			q <= q + 3'd1;
+       ((q == STATE_FIRST) && (clkref == 0)) ||
+       ((q != STATE_LAST) && (q != STATE_FIRST)))
+     q <= q + 3'd1;
 end
 
 // ---------------------------------------------------------------------
 // --------------------------- startup/reset ---------------------------
 // ---------------------------------------------------------------------
 
-// wait 1ms (32 85Mhz cycles) after FPGA config is done before going
+// wait 1ms (32 90Mhz cycles) after FPGA config is done before going
 // into normal operation. Initialize the ram in the last 16 reset cycles (cycles 15-0)
 reg [4:0] reset;
 always @(posedge clk) begin
@@ -116,20 +119,26 @@ assign sd_ras = sd_cmd[2];
 assign sd_cas = sd_cmd[1];
 assign sd_we  = sd_cmd[0];
 
-// drive ram data lines when writing, set them as inputs otherwise
-// the eight bits are sent on both bytes ports. Which one's actually
-// written depends on the state of dqm of which only one is active
-// at a time when writing
-assign sd_data_out = we ? din : 16'b0;
-
 wire oe = oeA;
 
-wire [15:0] dout = sd_data_in[15:0];
+reg acycle;
+
+// little: 0x
+// big:    0x876543210
 
 always @(posedge clk) begin
-	if (q == STATE_CMD_READ) begin
-		if (oeA) doutA <= dout;
-	end
+   if (q == STATE_CMD_START) begin
+      // latch into buffers?
+      acycle <= oe | we;
+   end
+   else if (q == STATE_CMD_RW && oeA)
+     doutA[15:0] <= sd_data_in[15:0];
+   else if (q == STATE_CMD_RW2 && oeA)
+     doutA[31:16] <= 0; // sd_data_in[15:0];
+   else if (q == STATE_CMD_RW2 + 1)
+     ready <= acycle;
+   else if (q == STATE_CMD_RW2 + 3)
+     ready <= 0;
 end
 
 wire [3:0] reset_cmd =
@@ -139,8 +148,8 @@ wire [3:0] reset_cmd =
 
 wire [3:0] run_cmd =
 	((we || oe) && (q == STATE_CMD_START)) ? CMD_ACTIVE :
-	(we && 	       (q == STATE_CMD_CONT)) ? CMD_WRITE :
-	(!we &&  oe && (q == STATE_CMD_CONT)) ? CMD_READ :
+	(we && 	       (q == STATE_CMD_CONT))  ? CMD_WRITE :
+	(!we &&  oe && (q == STATE_CMD_CONT))  ? CMD_READ :
 	(!we && !oe && (q == STATE_CMD_START)) ? CMD_AUTO_REFRESH :
 	CMD_INHIBIT;
 	
@@ -153,6 +162,12 @@ wire [12:0] run_addr =
 assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
 assign sd_addr = reset != 0 ? reset_addr : run_addr;
 assign sd_ba = addr[24:23];
-assign sd_dqm = we ? ~dqm : 2'b00;
+
+// drive ram data lines when writing, set them as inputs otherwise
+// the eight bits are sent on both bytes ports. Which one's actually
+// written depends on the state of dqm of which only one is active
+// at a time when writing
+assign sd_data_out = we ? (q == STATE_CMD_RW2 ? din[31:16] : din[15:0]) : 16'b0;
+assign sd_dqm = we ? ~(q == STATE_CMD_RW2 ? dqm[3:2] : dqm[0:1]) : 2'b00;
 
 endmodule
