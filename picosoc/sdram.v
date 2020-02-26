@@ -41,7 +41,7 @@ module sdram (
 	input 		 	clk,	    // sdram is accessed at up to 166MHz
 	input			clkref,	    // reference clock to sync to
 
-        input [24:0]   	addr,       // 25 bit byte address
+        input [25:0]   	addr,       // 26 bit byte address
 	input 		 	we,         // cpu/chipset requests write
 	input [3:0]     dqm,        // data byte write mask
 	input [31:0]  		din,	   // data input from chipset/cpu
@@ -125,7 +125,7 @@ reg acycle;
 
 // little: 0x
 // big:    0x876543210
-
+ 
 always @(posedge clk) begin
    case (q)
      STATE_CMD_START:
@@ -134,7 +134,6 @@ always @(posedge clk) begin
        dout[15:0] <= sd_data_in[15:0];
      STATE_CMD_READ2: begin
 	dout[31:16] <= sd_data_in[15:0];
-	//STATE_CMD_READ2 + 1:
 	ready <= acycle;
      end
      STATE_CMD_READ2 + 2:
@@ -157,12 +156,12 @@ wire [3:0] run_cmd =
 wire [12:0] reset_addr = reset == 13 ? 13'b0010000000000 : MODE;
 // 8192 x 1024 x 16 x 4 banks
 wire [12:0] run_addr =
-	q == STATE_CMD_START ? addr[22:10] : // RA0-RA12: Row address
-	    {4'b0010, addr[9:1]}; // CA0-CA9: Column address
+	q == STATE_CMD_START ? addr[23:11] : // RA0-RA12: 8192 Row address
+	    {3'b001, addr[10:1]}; // CA0-CA9: 1024 Column address
 
 assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
 assign sd_addr = reset != 0 ? reset_addr : run_addr;
-assign sd_ba = addr[24:23];
+assign sd_ba = addr[25:24];
 
 // drive ram data lines when writing, set them as inputs otherwise
 // the eight bits are sent on both bytes ports. Which one's actually
