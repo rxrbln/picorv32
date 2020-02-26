@@ -46,18 +46,18 @@ module sdram (
 	input [3:0]     dqm,        // data byte write mask
 	input [31:0]  		din,	   // data input from chipset/cpu
 	input 		 	oeA,       // cpu requests data
-	output reg [31:0]  doutA,	   // data output to cpu
+	output reg [31:0] dout,
 	output reg ready,
-);
-      
+);   
+   
 
 // no burst configured
 localparam RASCAS_DELAY   = 3'd3;   // tRCD=20ns -> 3 cycles@128MHz
-localparam BURST_LENGTH   = 3'b000; // 000=1, 001=2, 010=4, 011=8
+localparam BURST_LENGTH   = 3'b001; // 000=1, 001=2, 010=4, 011=8
 localparam ACCESS_TYPE    = 1'b0;   // 0=sequential, 1=interleaved
-localparam CAS_LATENCY    = 3'd3;   // 2/3 allowed
+localparam CAS_LATENCY    = 3'd2;   // 2/3 allowed
 localparam OP_MODE        = 2'b00;  // only 00 (standard operation) allowed
-localparam NO_WRITE_BURST = 1'b1;   // 0= write burst enabled, 1=only single access write
+localparam NO_WRITE_BURST = 1'b0;   // 0= write burst enabled, 1=only single access write
 
 localparam MODE = {3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, BURST_LENGTH};
 
@@ -69,8 +69,8 @@ localparam MODE = {3'b000, NO_WRITE_BURST, OP_MODE, CAS_LATENCY, ACCESS_TYPE, BU
 localparam STATE_FIRST     = 4'd0;   // first state in cycle
 localparam STATE_CMD_START = 4'd1;   // state in which a new command can be started
 localparam STATE_CMD_CONT  = STATE_CMD_START + RASCAS_DELAY; // command can be continued
-localparam STATE_CMD_RW    = STATE_CMD_CONT + CAS_LATENCY;   // read/write state
-localparam STATE_CMD_RW2   = STATE_CMD_RW + 1;   // read/write state
+localparam STATE_CMD_READ  = STATE_CMD_CONT + CAS_LATENCY;   // read/write state
+localparam STATE_CMD_READ2 = STATE_CMD_READ + 1;   // read/write state
 localparam STATE_LAST      = 4'd15;  // last state in cycle
 
 reg [3:0] q = STATE_FIRST;
@@ -127,18 +127,19 @@ reg acycle;
 // big:    0x876543210
 
 always @(posedge clk) begin
-   if (q == STATE_CMD_START) begin
-      // latch into buffers?
-      acycle <= oe | we;
-   end
-   else if (q == STATE_CMD_RW && oeA)
-     doutA[15:0] <= sd_data_in[15:0];
-   else if (q == STATE_CMD_RW2 && oeA)
-     doutA[31:16] <= 0; // sd_data_in[15:0];
-   else if (q == STATE_CMD_RW2 + 1)
-     ready <= acycle;
-   else if (q == STATE_CMD_RW2 + 3)
-     ready <= 0;
+   case (q)
+     STATE_CMD_START:
+       acycle <= oe | we;
+     STATE_CMD_READ:
+       dout[15:0] <= sd_data_in[15:0];
+     STATE_CMD_READ2: begin
+	dout[31:16] <= sd_data_in[15:0];
+	//STATE_CMD_READ2 + 1:
+	ready <= acycle;
+     end
+     STATE_CMD_READ2 + 2:
+       ready <= 0;
+     endcase
 end
 
 wire [3:0] reset_cmd =
@@ -167,7 +168,7 @@ assign sd_ba = addr[24:23];
 // the eight bits are sent on both bytes ports. Which one's actually
 // written depends on the state of dqm of which only one is active
 // at a time when writing
-assign sd_data_out = we ? (q == STATE_CMD_RW2 ? din[31:16] : din[15:0]) : 16'b0;
-assign sd_dqm = we ? ~(q == STATE_CMD_RW2 ? dqm[3:2] : dqm[0:1]) : 2'b00;
+assign sd_data_out = q >= STATE_CMD_CONT + 1 ? din[31:16] : din[15:0];
+assign sd_dqm = we ? (q >= STATE_CMD_CONT + 1 ? dqm[3:2] : dqm[1:0]) : 2'b0;
 
 endmodule
