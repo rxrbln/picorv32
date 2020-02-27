@@ -156,12 +156,12 @@ wire [3:0] run_cmd =
 wire [12:0] reset_addr = reset == 13 ? 13'b0010000000000 : MODE;
 // 8192 x 1024 x 16 x 4 banks
 wire [12:0] run_addr =
-	q == STATE_CMD_START ? addr[23:11] : // RA0-RA12: 8192 Row address
+	q == STATE_CMD_START ? {addr[25:24], addr[21:11]} : // RA0-RA12: 8192 Row address
 	    {3'b001, addr[10:1]}; // CA0-CA9: 1024 Column address
 
 assign sd_cmd = reset != 0 ? reset_cmd : run_cmd;
 assign sd_addr = reset != 0 ? reset_addr : run_addr;
-assign sd_ba = addr[25:24];
+assign sd_ba = addr[23:22];
 
 // drive ram data lines when writing, set them as inputs otherwise
 // the eight bits are sent on both bytes ports. Which one's actually
