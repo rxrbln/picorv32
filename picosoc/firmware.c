@@ -34,7 +34,7 @@
 
 const uint32_t SYSCLK =
 #ifdef ULX3S
-  40000000;
+  41666667;
 #else
   12937000;
 #endif
@@ -53,6 +53,8 @@ extern uint32_t sram;
 
 static uint32_t* vga_vram = (void*)0x80000000;
 static uint32_t* vga_font = (void*)0x80002000;
+
+static volatile uint32_t* sdram = (void*)0x20000000;
 
 // --------------------------------------------------------
 
@@ -514,31 +516,55 @@ uint32_t xorshift32(uint32_t *state)
 	return x;
 }
 
-void cmd_memtest()
+void cmd_memtest(int ext)
 {
 	int cyc_count = 5;
 	int stride = 256;
 	uint32_t state;
+	uint32_t errors;
 
-	volatile uint32_t *base_word = (uint32_t *) 0;
-	volatile uint8_t *base_byte = (uint8_t *) 0;
-
+	volatile uint32_t *base_word = (uint32_t *) (ext ? sdram : 0);
+	volatile uint8_t *base_byte = (uint8_t *) (ext ? sdram : 0);
+	const int mem_total = ext ? 64*1024*1024 : MEM_TOTAL;
 	print("Running memtest ");
+
+	// Walk in all w/ 3 increments, word access
+	if (ext)
+	for (int i = 1; i <= 1; i++) {
+		state = i;
+
+		for (int word = 0; word < mem_total / sizeof(int); word += 3) {
+			*(base_word + word) = word;
+		}
+
+		for (int word = 0; word < mem_total / sizeof(int); word += 3) {
+		          uint32_t v = *(base_word + word), v2 = word;
+			  if (v != v2) {
+			    printf(" ***FAILED INDEX*** at %x: %x != %x\n", 4*word, v, v2);
+			  ++errors;
+			  return;
+			}
+		}
+
+		print(".");
+	}
 
 	// Walk in stride increments, word access
 	for (int i = 1; i <= cyc_count; i++) {
 		state = i;
 
-		for (int word = 0; word < MEM_TOTAL / sizeof(int); word += stride) {
+		for (int word = 0; word < mem_total / sizeof(int); word += stride) {
 			*(base_word + word) = xorshift32(&state);
 		}
 
 		state = i;
 
-		for (int word = 0; word < MEM_TOTAL / sizeof(int); word += stride) {
-			if (*(base_word + word) != xorshift32(&state)) {
-			        printf(" ***FAILED WORD*** at %x\n", 4*word);
-				return;
+		for (int word = 0; word < mem_total / sizeof(int); word += stride) {
+		        uint32_t v = *(base_word + word), v2 = xorshift32(&state);
+			if (v != v2) {
+			        printf(" ***FAILED WORD*** at %x: %x != %x\n", 4*word, v, v2);
+				++errors;
+				//return;
 			}
 		}
 
@@ -553,11 +579,13 @@ void cmd_memtest()
 	for (int byte = 0; byte < 128; byte++) {
 		if (*(base_byte + byte) != (uint8_t) byte) {
 		        printf(" ***FAILED BYTE*** at %x\n", byte);
-			return;
+			++errors;
+			//return;
 		}
 	}
-
-	print(" passed\n");
+	
+	if (!errors)
+	  print(" passed\n");
 }
 
 // --------------------------------------------------------
@@ -997,21 +1025,114 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
-void cmd_read_vram()
+void cmd_read_ram()
 {
-  printf("16> %x %x %x %x", vga_vram[0], vga_vram[1], vga_vram[2], vga_vram[3]);
-  //printf(" 8> %x %x %x %x", vga_vram8[0], vga_vram8[1], vga_vram8[4+0], vga_vram[4+1]);
+  printf("0> %x %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3], sdram[4]);
 
-  printf("++16> %x %x %x", ++vga_vram[0], ++vga_vram[0], ++vga_vram[0]);
-  //printf(" 8> %x %x %x %x", vga_vram8[0], vga_vram8[1], vga_vram8[4+0], vga_vram[4+1]);
+  sdram[0] = 0x00112233; sdram[1] = 0x44556677; sdram[2] = 0x8899aabb; sdram[3] = 0xccddeeff;
+  //sdram[0] = 0x0011; sdram[1] = 0x2233; sdram[2] = 0x4455; sdram[3] = 0x6677;
+  printf("1> %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3]);
+  printf("2> %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3]);
 
+  sdram[0] = 0xffeeddcc; sdram[1] = 0xbbaa9988; sdram[2] = 0x77665544; sdram[3] = 0x33221100;
+  //sdram[0] = 0xffee; sdram[1] = 0xddcc; sdram[2] = 0xbbaa; sdram[3] = 0x9988;
+  printf("3> %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3]);
+  printf("4> %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3]);
+
+  printf("++16> %x %x %x %x\n", ++sdram[0], ++sdram[1], ++sdram[2], ++sdram[3]);
+  printf("++16> %x %x %x %x\n", ++sdram[0], ++sdram[1], ++sdram[2], ++sdram[3]);
+
+  //printf(" 8> %x %x %x %x", vga_vram8[0], vga_vram8[1], vga_vram8[4+0], vga_vram[4+1]);
   //printf("\n32> %x %x %x %x", vga_vram32[0], vga_vram32[1], vga_vram32[2], vga_vram32[3]);
   //printf(" 32++> %x %x %x %x", ++vga_vram32[0], ++vga_vram32[1], ++vga_vram32[2], ++vga_vram[3]);
 
   printf("\n");
 }
 
+
+void cmd_analyze()
+{
+  volatile uint32_t* log_buffer = (volatile uint32_t*)0x10000000;
+  int pos = 0;
+  while (pos >= 0) {
+    uint32_t samples = log_buffer[2048];
+    printf("@ %d/%d samples\n", pos, samples);
+    for (int ch = 0; ch < 4; ++ch) {
+      switch (ch) {
+      case 0: print("C:"); break;
+      case 1: print("S:"); break;
+      case 2: print("O:"); break;
+      case 3: print("I:"); break;
+      default: print("X:"); break;
+     }
+      for (int i = 0; i < 80 && pos + i < samples; ++i) {
+	// this is single cycle SRAM, so no point in caching, ...
+	uint32_t v = log_buffer[pos + i];
+	print(v & (1 << ch) ? "^" : "_");
+      }
+      print("\n");
+    }
+    
+    char c = getchar();
+    switch (c) {
+    case '1':
+      pos = 0; break;
+    case ' ':
+    case '\r':
+    case '\n':
+      pos += 40; break;
+    case 'b':
+    case '\b':
+    case '\x7f':
+      pos -= 40; if (pos < 0) pos = 0; break;
+    default:
+      printf("Quit w/ %d\n", c);
+    case 'q':
+      pos = -1;
+    }
+  }
+}
+
+const unsigned char crc7poly = 0b10001001;
+uint8_t crc7(const uint8_t* msg, uint16_t n) {
+  uint8_t crc = 0;
+  for (uint16_t i = 0; i < n; ++i) {
+     crc ^= msg[i];
+     for (uint8_t j = 0; j < 8; ++j) {
+      // crc = crc & 0x1 ? (crc >> 1) ^ crc7poly : crc >> 1;
+      crc = (crc & 0x80u) ? ((crc << 1) ^ (crc7poly << 1)) : (crc << 1);
+    }
+  }
+  return crc;
+}
+
+void cmd_read_sd() {
+  volatile uint32_t* spimmc = (volatile uint32_t*)0x02000010; // full 32 bits
+  volatile uint16_t* spimmc16 = (volatile uint16_t*)0x02000012; // first 16 MSBs
+  volatile uint8_t* spimmc8 = (volatile uint8_t*)0x02000013; // first 8 MSBs
+  volatile uint8_t* spimmcOOB = (volatile uint8_t*)0x02000011; // invalid trunctated write
+
+  printf("init\n");
+  // our FPGA hardware auto inits with ~100 cycles before 1st cmd after reset!
+  /*
+  *spimmc = 0x40000000; // 6 byte cmd0 + CRC, START(9) & STOP(1) bit!
+  *spimmc16 = 0x0095;*/
+  
+  uint8_t cmd0[6] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
+  cmd0[sizeof(cmd0)-1] = crc7(cmd0, 5) | 1;
+  for (int i = 0; i < sizeof(cmd0); ++i)
+    *spimmc8 = cmd0[i];
+
+  printf("%x ret1: ", cmd0[5]);
+  for (int i = 0; i < 16; ++i)
+    printf(" %x", *spimmc);
+  printf("\n");
+  
+  *spimmcOOB = 0xff; // OOB de-assert CS
+}
+
 // --------------------------------------------------------
+
 
 
 const uint8_t charset[] = {
@@ -1055,8 +1176,7 @@ void main()
 	print("|_|_\\/_/ \\_\\|__.'|___|\n");
 	printf(" @%dMHz MEM: %dKiB\n\n", SYSCLK / 1000000, MEM_TOTAL / 1024);
 
-	cmd_memtest();
-	print("\n");
+	//cmd_memtest(0); print("\n");
 	
 	set_flash_mode_qddr(); // default to qddr for our convinience
 	
@@ -1121,8 +1241,9 @@ void main()
 			case '0':
 				cmd_benchmark_all();
 				break;
+			case 'm':
 			case 'M':
-				cmd_memtest();
+				cmd_memtest(cmd == 'M');
 				break;
 			case 'S':
 				cmd_print_spi_state();
@@ -1130,11 +1251,15 @@ void main()
 			case 'e':
 				cmd_echo();
 				break;
+			case 'a':
+			        cmd_analyze();
+				break;
 			case 'r':
-			        cmd_read_vram();
+			        cmd_read_ram();
 				break;
 			case 's':
-			        scroll ^= 2; // or 1
+			        cmd_read_sd();
+			        //scroll ^= 2; // or 1
 				break;
 			case 'd':
 			case 'D':
