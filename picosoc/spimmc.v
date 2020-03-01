@@ -24,7 +24,10 @@ module spimmc (
    	parameter integer LOG_SIZE = 2048;
         reg [3:0] log_buffer[LOG_SIZE];
         reg [10:0] log_pos = 0;
-   
+
+        reg _spi_sclk;
+        //assign spi_sclk = !_spi_sclk; // positive or negative CPOL
+  
    
    	always @(posedge clk) begin
 	   log_ready <= 0;
@@ -44,41 +47,49 @@ module spimmc (
    
         assign rdata = buffer;
    
-        reg [7:0] div = 100;
+        reg [7:0] div = 200;
         reg [7:0] clkcnt = 0;
-     
+
+        reg sample;
+   
 	always @(posedge clk) begin
 	   ready <= 0;
-
-	   
-	   if (sample) begin // Logic Analyzer
-	      log_buffer[log_pos] <= {spi_miso, spi_mosi, spi_csn, spi_sclk};
-	      if (log_pos < LOG_SIZE - 1)
-		log_pos <= log_pos + 1;
-	      sample <= 0;
-	   end
 	   
 	   if (reset || !valid || ready) begin
 	      if (reset) begin
 		 spi_csn <= 1;
 		 state <= reset ? 0 : 1; // reset to init state 0
 	      end
-	      spi_sclk <= 1;
+	      spi_mosi <= 0; // just signal prettification
+	      _spi_sclk <= 1;
 	      xfer_cnt <= 0;
 	   end else begin
 	      // divide clock (e.g. 40 MHz -> 400kHz
 	      clkcnt <= clkcnt + 1;
+	      
+	      if (sample && (clkcnt == div || clkcnt == div / 2)) begin // Logic Analyzer
+		 log_buffer[log_pos] <= {spi_miso, spi_mosi, spi_csn, spi_sclk};
+		 if (log_pos < LOG_SIZE - 1)
+		   log_pos <= log_pos + 1;
+		 else
+		   sample <= 0;
+	      end
+	      
 	      if (clkcnt == div) begin
 		 clkcnt <= 0;
-		 sample <= 1; // Logic Analizer sample after this clock
+		 
+		 sample = 1; // Logic Analizer start sampling after 1st valid select
+		 
+		 // update sclk one clk, phase delayed
+		 spi_sclk <= !_spi_sclk;
 		 
 		 // current transfer
 		 if (xfer_cnt) begin
-		    if (spi_sclk) begin
-		       spi_sclk <= 0;
+		    if (_spi_sclk) begin
+		       _spi_sclk <= 0;
 		       spi_mosi <= buffer[31];
 		    end else begin
-		       spi_sclk <= 1;
+		       _spi_sclk <= 1;
 		       buffer <= {buffer, spi_miso};
 		       xfer_cnt <= xfer_cnt - 1;
 		    end
@@ -86,7 +97,7 @@ module spimmc (
 		   case (state)
 		     0: begin // initial min 74 cycles clk w/o cs
 			buffer <= 32'hffff_ffff;
-			xfer_cnt <= 100;
+			xfer_cnt <= 80;
 			state <= 1;
 		     end
 		     1: begin // start write out
