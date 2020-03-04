@@ -1128,6 +1128,8 @@ uint8_t sd_status() {
 }
 
 uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data, int dsize) {
+  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
+  
   cmd[0] |= 0x40;
   cmd[size - 1] = crc7(cmd, size - 1) | 1; // stop bit
   for (int i = 0; i < size; ++i) {
@@ -1144,8 +1146,6 @@ uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data, int dsize) {
     }
     printf("\n");
   }
-  
-  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
   
   return status;
 }
@@ -1168,9 +1168,31 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
   return status;
 }
 
-uint8_t sd_read(uint32_t addr, uint8_t* data, int len) {
+uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
-  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), data, len);
+  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), 0, 0);
+  
+    // wait for data token
+  uint8_t token;
+  for (int i = 0; i < 128; ++i) {
+    token = *spimmc;
+    if (token == 0b11111110)
+      break;
+    else if (token != 0xff)
+      printf("Unknown token: %02x\n", token);
+    token = 0;
+  }
+  if (token) {
+    for (int i = 0; i < dsize; ++i) {
+      data[i] = *spimmc;
+      printf("%02x", data[i]);
+    }
+    printf("\n");
+  }
+
+  uint16_t crc = (*spimmc) << 16 | *spimmc;
+  printf("crc: %04x\n", crc);
+
   return status;
 }
 
