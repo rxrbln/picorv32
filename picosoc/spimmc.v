@@ -1,5 +1,24 @@
-
-// SPI MMC memory interface, based on the picosoc project
+/*
+ *  SPI MMC memory interface, based on PicoSoC SPI
+ *  Copyright (C) 2020  René Rebe <rene@exactcode.de>
+ *
+ *  PicoSoC - A simple example SoC using PicoRV32
+ *
+ *  Copyright (C) 2017  Clifford Wolf <clifford@clifford.at>
+ *
+ *  Permission to use, copy, modify, and/or distribute this software for any
+ *  purpose with or without fee is hereby granted, provided that the above
+ *  copyright notice and this permission notice appear in all copies.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ *  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ *  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ *  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ *  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ *  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ *  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ */
 
 module spimmc (
 	input clk, reset,
@@ -10,7 +29,7 @@ module spimmc (
 	output [31:0] rdata,
 
 	output reg spi_csn,
-	output reg spi_sclk,
+	output spi_sclk,
 	output reg spi_mosi,
 	input spi_miso,
 
@@ -26,7 +45,7 @@ module spimmc (
         reg [10:0] log_pos = 0;
 
         reg _spi_sclk;
-        //assign spi_sclk = !_spi_sclk; // positive or negative CPOL
+        assign spi_sclk = _spi_sclk; // positive or negative CPOL
   
    
    	always @(posedge clk) begin
@@ -47,8 +66,8 @@ module spimmc (
    
         assign rdata = buffer;
    
-        reg [7:0] div = 200;
-        reg [7:0] clkcnt = 0;
+        reg [9:0] div = 200;
+        reg [9:0] clkcnt = 0;
 
         reg sample;
    
@@ -81,7 +100,7 @@ module spimmc (
 		 sample = 1; // Logic Analizer start sampling after 1st valid select
 		 
 		 // update sclk one clk, phase delayed
-		 spi_sclk <= !_spi_sclk;
+		 //spi_sclk <= !_spi_sclk;
 		 
 		 // current transfer
 		 if (xfer_cnt) begin
@@ -111,8 +130,8 @@ module spimmc (
 			   state <= 2;
 			end
 		     end
-		     2: begin // start read, always try 32
-			xfer_cnt <= wdata_cnt == 0 ? 32 : 0; // read or write cycle?
+		     2: begin // start read, always try 8
+			xfer_cnt <= wdata_cnt == 0 ? 8 : 0; // read or write cycle?
 			buffer <= 32'hffff_ffff; // keep output high
 			state <= 3;
 		     end
