@@ -51,10 +51,10 @@ extern uint32_t sram;
 #define reg_fm ((volatile uint32_t*)0x40000010)
 #define reg_fm16 ((volatile uint16_t*)0x40000010)
 
-static uint32_t* vga_vram = (void*)0x80000000;
-static uint32_t* vga_font = (void*)0x80002000;
+static uint32_t* vga_vram = (uint32_t*)0x80000000;
+static uint32_t* vga_font = (uint32_t*)0x80002000;
 
-static volatile uint32_t* sdram = (void*)0x20000000;
+static volatile uint32_t* sdram = (uint32_t*)0x20000000;
 
 // --------------------------------------------------------
 
@@ -694,7 +694,7 @@ void cmd_read_flash_regs()
 uint32_t cmd_benchmark(bool verbose, uint32_t *instns_p)
 {
 	uint8_t data[256];
-	uint32_t *words = (void*)data;
+	uint32_t *words = (uint32_t*)data;
 
 	uint32_t x32 = 314159265;
 
@@ -1106,40 +1106,140 @@ uint8_t crc7(const uint8_t* msg, uint16_t n) {
   return crc;
 }
 
-void cmd_read_sd() {
-  volatile uint32_t* spimmc = (volatile uint32_t*)0x02000010; // full 32 bits
-  volatile uint16_t* spimmc16 = (volatile uint16_t*)0x02000012; // first 16 MSBs
-  volatile uint8_t* spimmc8 = (volatile uint8_t*)0x02000013; // first 8 MSBs
-  volatile uint8_t* spimmcOOB = (volatile uint8_t*)0x02000011; // invalid trunctated write
+volatile uint32_t* spimmc = (volatile uint32_t*)0x02000010; // full 32 bits
+volatile uint16_t* spimmc16 = (volatile uint16_t*)0x02000012; // first 16 MSBs
+volatile uint8_t* spimmc8 = (volatile uint8_t*)0x02000013; // first 8 MSBs
+volatile uint8_t* spimmcOOB = (volatile uint8_t*)0x02000011; // invalid trunctated write
 
-  printf("init\n");
+// TODO: better SD status / error handling
+
+uint8_t sd_status() {
+  uint8_t status;
+  // wait for status
+  printf("status: ");
+  for (int i = 0; i < 16; ++i) {
+    status = *spimmc;
+      printf(" %x", status);
+      if (status != 0xff)
+	break;
+  }
+  printf(": %x\n", status & 0xff);
+  return status;
+}
+
+uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data, int dsize) {
+  cmd[0] |= 0x40;
+  cmd[size - 1] = crc7(cmd, size - 1) | 1; // stop bit
+  for (int i = 0; i < size; ++i) {
+    *spimmc8 = cmd[i];
+    printf("%02x", cmd[i]);
+  }
+  printf(" - ");
+  uint8_t status = sd_status();
+  // response payload
+  if (dsize > 0 && (status == 0 || status == 1)) {
+    for (int i = 0; i < dsize; ++i) {
+      data[i] = *spimmc;
+      printf("%02x", data[i]);
+    }
+    printf("\n");
+  }
+  
+  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
+  
+  return status;
+}
+
+uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
+  // 1st send CMD55 ACMD prefix command
+  uint8_t cmd55[6] = {55};
+  uint8_t status = sd_cmd(cmd55, sizeof(cmd55), 0, 0);
+  if (status != 0x01 && status != 0x05) {
+    printf("CMD55 error\n");
+    return status;
+  }
+
+  status = sd_cmd(acmd, size, data, dsize);
+  if (status != 0x01 && status != 0x00) {
+    printf("ACMD error\n");
+    return status;
+  }
+  
+  return status;
+}
+
+uint8_t sd_read(uint32_t addr, uint8_t* data, int len) {
+  uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
+  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), data, len);
+  return status;
+}
+
+
+void cmd_read_sd() {
+  printf("sd test\n");
   // our FPGA hardware auto inits with ~100 cycles before 1st cmd after reset!
   /*
   *spimmc = 0x40000000; // 6 byte cmd0 + CRC, START(9) & STOP(1) bit!
   *spimmc16 = 0x0095;*/
   
-  uint8_t cmd0[6] = {0x40, 0x00, 0x00, 0x00, 0x00, 0x95};
-  cmd0[sizeof(cmd0)-1] = crc7(cmd0, 5) | 1;
-  for (int i = 0; i < sizeof(cmd0); ++i)
-    *spimmc8 = cmd0[i];
+  // send cmd0
+  uint8_t cmd0[6] = {0};
+  uint8_t status = sd_cmd(cmd0, sizeof(cmd0), 0, 0);
+  if (status == 0xff) {
+    printf("no sd card\n");
+    goto end;
+  }
 
-  printf("%x ret1: ", cmd0[5]);
-  for (int i = 0; i < 16; ++i)
-    printf(" %x", *spimmc);
-  printf("\n");
+  // in idle, SD only accepts CMD0, CMD1, CMD8, ACMD41, CMD58 and CMD59
+  // SDC v2 check voltage ranges
+  uint8_t data[4];
+  uint8_t cmd8[6] = {8, 0x00, 0x00, 0x01/*volt*/, 0xec/*check pat*/};
+  status = sd_cmd(cmd8, sizeof(cmd8), data, sizeof(data));
+  if (status != 0x01) {
+    printf("no cmd8 volt range\n");
+    goto end;
+  }
   
+  // init & wait idle
+  for (int i = 0; i < 64; ++i) {
+    uint8_t acmd41[6] = {41, 0x40};
+    status = sd_acmd(acmd41, sizeof(acmd41), 0, 0);
+    if (status == 0) {
+      break;
+    }
+    if (status != 0x01 && status != 0x00) {
+      printf("acmd error: %x\n", status);
+      goto end;
+    }
+  }
+  
+  printf("init'ed!\n");
+  
+  uint8_t block[512];
+  status = sd_read(0, block, sizeof(block));
+  printf("read: %x\n", status);
+  
+#if 0
+  // TODO: for old cards only
+  // send init cmd1
+  uint8_t cmd1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
+  status = sd_cmd(cmd1, sizeof(cmd1), 0, 0);
+  if (status != 0) {
+    printf("sd card did not init\n");
+  }
+#endif
+
+ end:
   *spimmcOOB = 0xff; // OOB de-assert CS
 }
 
 // --------------------------------------------------------
 
-
-
 const uint8_t charset[] = {
   // custom charset, if you want any
 };
 
-const char banner[80] = "RX32 SoC, initializing. https://rene.rene.name ;-)";
+const char banner[80] = "RX32 SoC, initializing. https://rene.rene.de ;-)";
 
 const uint32_t jit[] = {
   0x00400593,
@@ -1153,7 +1253,7 @@ const uint16_t fbimg[] = {
 
 void main()
 {
-	volatile uint32_t* vga_mmio = (void*)0x80800000;
+        volatile uint32_t* vga_mmio = (volatile uint32_t*)0x80800000;
 	uint32_t cursor = 0;
 	
 	reg_leds = 31;
@@ -1268,7 +1368,7 @@ void main()
 			case 'g':
 			case 'G':
 			        {
-				  volatile uint32_t* vga_ctrl = (void*)0x808ffffc;
+				  volatile uint32_t* vga_ctrl = (volatile uint32_t*)0x808ffffc;
 				  *vga_ctrl ^= 1;
 				  if (cmd == 'g') {
 				    for (int y = 0; y < 240; ++y)
