@@ -1127,7 +1127,7 @@ uint8_t sd_status() {
   return status;
 }
 
-uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data, int dsize) {
+uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data = 0, int dsize = 0) {
   *spimmcOOB = 0xff; // OOB de-assert CS, start new command
   
   cmd[0] |= 0x40;
@@ -1153,7 +1153,7 @@ uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data, int dsize) {
 uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
   // 1st send CMD55 ACMD prefix command
   uint8_t cmd55[6] = {55};
-  uint8_t status = sd_cmd(cmd55, sizeof(cmd55), 0, 0);
+  uint8_t status = sd_cmd(cmd55, sizeof(cmd55));
   if (status != 0x01 && status != 0x05) {
     printf("CMD55 error\n");
     return status;
@@ -1170,9 +1170,9 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
 
 uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
-  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), 0, 0);
+  uint8_t status = sd_cmd(cmd17, sizeof(cmd17));
   
-    // wait for data token
+  // wait for data token
   uint8_t token;
   for (int i = 0; i < 128; ++i) {
     token = *spimmc;
@@ -1206,7 +1206,12 @@ void cmd_read_sd() {
   
   // send cmd0
   uint8_t cmd0[6] = {0};
-  uint8_t status = sd_cmd(cmd0, sizeof(cmd0), 0, 0);
+  uint8_t data[4];
+  uint8_t cmd8[6] = {8, 0x00, 0x00, 0x01/*volt*/, 0xec/*check pat*/};
+  uint8_t acmd41[6] = {41, 0x40};
+  uint8_t block[512];
+   
+  uint8_t status = sd_cmd(cmd0, sizeof(cmd0));
   if (status == 0xff) {
     printf("no sd card\n");
     goto end;
@@ -1214,8 +1219,6 @@ void cmd_read_sd() {
 
   // in idle, SD only accepts CMD0, CMD1, CMD8, ACMD41, CMD58 and CMD59
   // SDC v2 check voltage ranges
-  uint8_t data[4];
-  uint8_t cmd8[6] = {8, 0x00, 0x00, 0x01/*volt*/, 0xec/*check pat*/};
   status = sd_cmd(cmd8, sizeof(cmd8), data, sizeof(data));
   if (status != 0x01) {
     printf("no cmd8 volt range\n");
@@ -1224,7 +1227,6 @@ void cmd_read_sd() {
   
   // init & wait idle
   for (int i = 0; i < 64; ++i) {
-    uint8_t acmd41[6] = {41, 0x40};
     status = sd_acmd(acmd41, sizeof(acmd41), 0, 0);
     if (status == 0) {
       break;
@@ -1237,7 +1239,6 @@ void cmd_read_sd() {
   
   printf("init'ed!\n");
   
-  uint8_t block[512];
   status = sd_read(0, block, sizeof(block));
   printf("read: %x\n", status);
   
@@ -1245,7 +1246,7 @@ void cmd_read_sd() {
   // TODO: for old cards only
   // send init cmd1
   uint8_t cmd1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
-  status = sd_cmd(cmd1, sizeof(cmd1), 0, 0);
+  status = sd_cmd(cmd1, sizeof(cmd1));
   if (status != 0) {
     printf("sd card did not init\n");
   }
