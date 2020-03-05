@@ -1113,6 +1113,8 @@ volatile uint8_t* spimmcOOB = (volatile uint8_t*)0x02000011; // invalid trunctat
 
 // TODO: better SD status / error handling
 
+#define BIT(x) (1 << x)
+
 uint8_t sd_status() {
   uint8_t status;
   // wait for status
@@ -1123,7 +1125,18 @@ uint8_t sd_status() {
       if (status != 0xff)
 	break;
   }
-  printf(": %x\n", status & 0xff);
+  if (status) {
+    printf(":", status);
+    printf("%s%s%s%s%s%s%s\n",
+	   status & BIT(6) ? " ParameterError" : "",
+	   status & BIT(5) ? " AddressError" : "",
+	   status & BIT(4) ? " EraseSeqError" : "",
+	   status & BIT(3) ? " CommandCRCReror" : "",
+	   status & BIT(2) ? " IllegalCommand" : "",
+	   status & BIT(1) ? " EraseReset" : "",
+	   status & BIT(0) ? " Idle" : "");
+  }
+  
   return status;
 }
 
@@ -1196,6 +1209,28 @@ uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   return status;
 }
 
+  
+  // +218 0x0000
+  // +220 0x00		// orig. drive
+  // +221 0x00		// sec
+  // +221 0x00		// min
+  // +222 0x00		// hour
+  // +440 0x00000000	// disk id
+  // +446 // part 1
+  // +462 // part 2
+  // +478 // part 3
+  // +494 // part 4
+  // +510 // signature 0x55aa
+  
+  struct Partition {
+    uint8_t status;
+    uint8_t first_chs[3];
+    uint8_t type;
+    uint8_t last_chs[3];
+    uint32_t first_lba;
+    uint32_t sectors;
+  };
+
 
 void cmd_read_sd() {
   printf("sd test\n");
@@ -1222,7 +1257,15 @@ void cmd_read_sd() {
   status = sd_cmd(cmd8, sizeof(cmd8), data, sizeof(data));
   if (status != 0x01) {
     printf("no cmd8 volt range\n");
-    goto end;
+    
+    // send init cmd1, for old cards only
+    uint8_t cmd1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
+    status = sd_cmd(cmd1, sizeof(cmd1));
+    if (status != 0) {
+      printf("sd card did not init\n");
+      goto end;
+    }
+    goto inited;
   }
   
   // init & wait idle
@@ -1236,21 +1279,16 @@ void cmd_read_sd() {
       goto end;
     }
   }
+
+ inited:
   
   printf("init'ed!\n");
   
   status = sd_read(0, block, sizeof(block));
   printf("read: %x\n", status);
   
-#if 0
-  // TODO: for old cards only
-  // send init cmd1
-  uint8_t cmd1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
-  status = sd_cmd(cmd1, sizeof(cmd1));
-  if (status != 0) {
-    printf("sd card did not init\n");
-  }
-#endif
+  // decode partition table
+  
 
  end:
   *spimmcOOB = 0xff; // OOB de-assert CS
