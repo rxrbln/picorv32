@@ -463,7 +463,7 @@ int printf(const char* format, ...)
   return ret;
 }
 
-char getchar_prompt(char *prompt)
+char getchar_prompt(const char *prompt)
 {
 	int32_t c = -1;
 	uint32_t cycles_begin, cycles_now, cycles;
@@ -1122,10 +1122,11 @@ uint8_t sd_status() {
   for (int i = 0; i < 16; ++i) {
     status = *spimmc;
       printf(" %x", status);
-      if (status != 0xff)
+      // wait for stop bit to clear
+      if ((status & 0x80) == 0)
 	break;
   }
-  if (status) {
+  if (status && status != 0xff) {
     printf(":", status);
     printf("%s%s%s%s%s%s%s\n",
 	   status & BIT(6) ? " ParameterError" : "",
@@ -1135,14 +1136,15 @@ uint8_t sd_status() {
 	   status & BIT(2) ? " IllegalCommand" : "",
 	   status & BIT(1) ? " EraseReset" : "",
 	   status & BIT(0) ? " Idle" : "");
+  } else {
+    printf("\n");
   }
   
   return status;
 }
 
-uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data = 0, int dsize = 0) {
-  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
-  
+uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data = 0, int dsize = 0,
+	       bool nodeassert = false) {
   cmd[0] |= 0x40;
   cmd[size - 1] = crc7(cmd, size - 1) | 1; // stop bit
   for (int i = 0; i < size; ++i) {
@@ -1160,13 +1162,16 @@ uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data = 0, int dsize = 0) {
     printf("\n");
   }
   
+  if (!nodeassert)
+    *spimmcOOB = 0xff; // OOB de-assert CS, start new command
+
   return status;
 }
 
 uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
   // 1st send CMD55 ACMD prefix command
   uint8_t cmd55[6] = {55};
-  uint8_t status = sd_cmd(cmd55, sizeof(cmd55));
+  uint8_t status = sd_cmd(cmd55, sizeof(cmd55), 0, 0, true);
   if (status != 0x01 && status != 0x05) {
     printf("CMD55 error\n");
     return status;
@@ -1183,8 +1188,10 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
 
 uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
-  uint8_t status = sd_cmd(cmd17, sizeof(cmd17));
+  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), 0, 0, true);
   
+  const bool sd_log = false;
+
   // wait for data token
   uint8_t token;
   for (int i = 0; i < 128; ++i) {
@@ -1198,38 +1205,47 @@ uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   if (token) {
     for (int i = 0; i < dsize; ++i) {
       data[i] = *spimmc;
-      printf("%02x", data[i]);
+      if (sd_log) printf("%02x", data[i]);
     }
-    printf("\n");
+    if (sd_log) printf("\n");
   }
 
   uint16_t crc = (*spimmc) << 16 | *spimmc;
-  printf("crc: %04x\n", crc);
+  // TODO: check crc
+  if (sd_log) printf("crc: %04x\n", crc);
+  
+  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
 
   return status;
 }
 
-  
-  // +218 0x0000
-  // +220 0x00		// orig. drive
-  // +221 0x00		// sec
-  // +221 0x00		// min
-  // +222 0x00		// hour
-  // +440 0x00000000	// disk id
-  // +446 // part 1
-  // +462 // part 2
-  // +478 // part 3
-  // +494 // part 4
-  // +510 // signature 0x55aa
-  
-  struct Partition {
-    uint8_t status;
-    uint8_t first_chs[3];
-    uint8_t type;
-    uint8_t last_chs[3];
-    uint32_t first_lba;
-    uint32_t sectors;
-  };
+
+
+#include "Endianess.hh"
+
+using Exact::EndianessConverter;
+using Exact::LittleEndianTraits;
+
+// +218 0x0000
+// +220 0x00		// orig. drive
+// +221 0x00		// sec
+// +221 0x00		// min
+// +222 0x00		// hour
+// +440 0x00000000	// disk id
+// +446 // part 1
+// +462 // part 2
+// +478 // part 3
+// +494 // part 4
+// +510 // signature 0x55aa
+
+struct MbrPartition {
+  uint8_t status;
+  uint8_t first_chs[3];
+  uint8_t type;
+  uint8_t last_chs[3];
+  EndianessConverter<uint32_t, LittleEndianTraits> first_lba;
+  EndianessConverter<uint32_t, LittleEndianTraits> sectors;
+};
 
 
 void cmd_read_sd() {
@@ -1240,32 +1256,27 @@ void cmd_read_sd() {
   *spimmc16 = 0x0095;*/
   
   // send cmd0
+  uint8_t status;
   uint8_t cmd0[6] = {0};
   uint8_t data[4];
   uint8_t cmd8[6] = {8, 0x00, 0x00, 0x01/*volt*/, 0xec/*check pat*/};
-  uint8_t acmd41[6] = {41, 0x40};
+  uint8_t cmd16[6] = {16, 0x00, 0x00, 0x02, 0x00}; // 512 bytes block
+  uint8_t acmd41[6] = {41, 0x40}; // SDHC or SDXC Supported
   uint8_t block[512];
-   
-  uint8_t status = sd_cmd(cmd0, sizeof(cmd0));
-  if (status == 0xff) {
-    printf("no sd card\n");
-    goto end;
+  
+  for (int i = 0; i < 8; ++i) {
+    status  = sd_cmd(cmd0, sizeof(cmd0));
+    if (status == 0xff) {
+      printf("no sd card\n");
+      goto end;
+    }
   }
-
+  
   // in idle, SD only accepts CMD0, CMD1, CMD8, ACMD41, CMD58 and CMD59
   // SDC v2 check voltage ranges
   status = sd_cmd(cmd8, sizeof(cmd8), data, sizeof(data));
   if (status != 0x01) {
     printf("no cmd8 volt range\n");
-    
-    // send init cmd1, for old cards only
-    uint8_t cmd1[6] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00};
-    status = sd_cmd(cmd1, sizeof(cmd1));
-    if (status != 0) {
-      printf("sd card did not init\n");
-      goto end;
-    }
-    goto inited;
   }
   
   // init & wait idle
@@ -1276,6 +1287,21 @@ void cmd_read_sd() {
     }
     if (status != 0x01 && status != 0x00) {
       printf("acmd error: %x\n", status);
+
+#if 0
+    // send init cmd1, for old cards only & wait idle
+    for (int i = 0; i < 64; ++i) {
+      uint8_t cmd1[6] = {1};
+      status = sd_cmd(cmd1, sizeof(cmd1));
+      if (status == 0)
+	goto inited;
+    }
+    
+    printf("sd card did not init\n");
+    goto end;
+
+#endif
+
       goto end;
     }
   }
@@ -1283,9 +1309,20 @@ void cmd_read_sd() {
  inited:
   
   printf("init'ed!\n");
+
+  // re-set block size to 512, new cards might default to more
+  status = sd_cmd(cmd16, sizeof(cmd16), 0, 0);
+  if (status) {
+    printf("set block size failed!\n");
+  }
   
   status = sd_read(0, block, sizeof(block));
   printf("read: %x\n", status);
+  
+  for (int i = 0; i < 4; ++i) {
+    MbrPartition* part = (MbrPartition*)&block[446 + i * sizeof(MbrPartition)];
+    printf("%d: %d %d \n", i, part->first_lba, part->sectors);
+  }
   
   // decode partition table
   
