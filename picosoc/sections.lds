@@ -3,16 +3,16 @@
 #elif HX8KDEMO
 #  define MEM_TOTAL 0x200 /* 2 KB */
 #elif ULX3S
-#  define MEM_TOTAL 0xC000 /* 48 KB */
+#  define MEM_TOTAL 0x20000 /* 128 KB */
 #else
 #  error "Set -DICEBREAKER, -DHX8KDEMO or -DULX3S when compiling firmware.c"
 #endif
 
 MEMORY {
 #ifdef ULX3S
-    FLASH (rx)      : ORIGIN = 0x00200000, LENGTH = 0x400000 /* entire flash, 4 MiB */
+    FLASH (rx)      : ORIGIN = 0x00200000, LENGTH = 0xE00000 /* entire flash, 14 MiB */
 #else
-    FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0x400000 /* entire flash, 4 MiB */
+    FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0xE00000 /* entire flash, 14 MiB */
 #endif
     RAM (xrw)       : ORIGIN = 0x00000000, LENGTH = MEM_TOTAL
 }
