@@ -1187,34 +1187,38 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
 }
 
 uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
-  uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
-  uint8_t status = sd_cmd(cmd17, sizeof(cmd17), 0, 0, true);
+  const bool sd_log = true;
+  static const int blocksize = 512;
+  uint8_t status = 0;
   
-  const bool sd_log = false;
-
-  // wait for data token
-  uint8_t token;
-  for (int i = 0; i < 128; ++i) {
-    token = *spimmc;
-    if (token == 0b11111110)
-      break;
-    else if (token != 0xff)
-      printf("Unknown token: %02x\n", token);
-    token = 0;
-  }
-  if (token) {
-    for (int i = 0; i < dsize; ++i) {
-      data[i] = *spimmc;
-      if (sd_log) printf("%02x", data[i]);
+  for (; dsize > 0; dsize -= blocksize, ++addr) {
+    uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
+    status = sd_cmd(cmd17, sizeof(cmd17), 0, 0, true);
+    
+    // wait for data token
+    uint8_t token;
+    for (int i = 0; i < 128; ++i) {
+      token = *spimmc;
+      if (token == 0b11111110)
+	break;
+      else if (token != 0xff)
+	printf("Unknown token: %02x\n", token);
+      token = 0;
     }
-    if (sd_log) printf("\n");
+    if (token) {
+      for (int i = 0; i < blocksize; ++i, ++data) {
+	*data = *spimmc;
+	if (sd_log) printf("%02x", *data);
+      }
+      if (sd_log) printf("\n");
+    }
+    
+    uint16_t crc = (*spimmc) << 16 | *spimmc;
+    // TODO: check crc
+    if (sd_log) printf("crc: %04x\n", crc);
+    
+    *spimmcOOB = 0xff; // OOB de-assert CS, start new command
   }
-
-  uint16_t crc = (*spimmc) << 16 | *spimmc;
-  // TODO: check crc
-  if (sd_log) printf("crc: %04x\n", crc);
-  
-  *spimmcOOB = 0xff; // OOB de-assert CS, start new command
 
   return status;
 }
@@ -1238,15 +1242,107 @@ using Exact::LittleEndianTraits;
 // +494 // part 4
 // +510 // signature 0x55aa
 
-struct MbrPartition {
+struct MbrPart {
   uint8_t status;
   uint8_t first_chs[3];
   uint8_t type;
   uint8_t last_chs[3];
   EndianessConverter<uint32_t, LittleEndianTraits> first_lba;
   EndianessConverter<uint32_t, LittleEndianTraits> sectors;
-};
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
 
+struct BiosParameterBlock {
+  // DOS 2.0
+  EndianessConverter<uint16_t, LittleEndianTraits> bytesPerSector;
+  uint8_t sectorsPerCluster;
+  EndianessConverter<uint16_t, LittleEndianTraits> reservedSectors;
+  uint8_t fats;
+  EndianessConverter<uint16_t, LittleEndianTraits> maxRootEntries;
+  EndianessConverter<uint16_t, LittleEndianTraits> totalSectors;
+  uint8_t media_desc;
+  EndianessConverter<uint16_t, LittleEndianTraits> sectorsPerFAT;
+  
+  // DOS 3.31
+  EndianessConverter<uint16_t, LittleEndianTraits> sectorsPerTrack;
+  EndianessConverter<uint16_t, LittleEndianTraits> heads;
+  EndianessConverter<uint32_t, LittleEndianTraits> hiddenSectors;
+  EndianessConverter<uint32_t, LittleEndianTraits> totalSectorsAndHidden;
+  
+  // FAT32 Extended
+  EndianessConverter<uint32_t, LittleEndianTraits> sectorsPerFAT2;
+  EndianessConverter<uint16_t, LittleEndianTraits> driveDesc;
+  EndianessConverter<uint16_t, LittleEndianTraits> version;
+
+  EndianessConverter<uint32_t, LittleEndianTraits> rootCluster;
+  EndianessConverter<uint16_t, LittleEndianTraits> infoSector;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
+
+
+struct FatBootSector {
+  uint8_t jump[3];
+  char oemname[8];
+  BiosParameterBlock bpb;
+  uint8_t pad[499 - sizeof(BiosParameterBlock)];
+  EndianessConverter<uint16_t, LittleEndianTraits> signature;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
+
+struct FatFsInfo {
+  uint8_t pad[512];
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
+
+
+struct FatDirEntry {
+  char filename[8];
+  char ext[3];
+
+  uint8_t attributes;
+  uint8_t pad[10];
+  
+  EndianessConverter<uint16_t, LittleEndianTraits> modTime;
+  EndianessConverter<uint16_t, LittleEndianTraits> modDate;
+  EndianessConverter<uint16_t, LittleEndianTraits> startCluster;
+  EndianessConverter<uint32_t, LittleEndianTraits> fileSize;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
+
+struct VFatDirEntry {
+  uint8_t sequence;
+  char /*EndianessConverter<uint16_t, LittleEndianTraits>*/ name1[5*2];
+  uint8_t attributes;
+  uint8_t type;
+  uint8_t dosNameChksum;
+  char /*EndianessConverter<uint16_t, LittleEndianTraits>*/ name2[6*2];
+  EndianessConverter<uint16_t, LittleEndianTraits> startCluster;
+  char /*EndianessConverter<uint16_t, LittleEndianTraits>*/ name3[2*2];
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+;
+
+
+// TODO: ClusterMap bits, of 12, 16, 32 ... little endian
+
+uint8_t block[512*2];
 
 void cmd_read_sd() {
   printf("sd test\n");
@@ -1262,7 +1358,6 @@ void cmd_read_sd() {
   uint8_t cmd8[6] = {8, 0x00, 0x00, 0x01/*volt*/, 0xec/*check pat*/};
   uint8_t cmd16[6] = {16, 0x00, 0x00, 0x02, 0x00}; // 512 bytes block
   uint8_t acmd41[6] = {41, 0x40}; // SDHC or SDXC Supported
-  uint8_t block[512];
   
   for (int i = 0; i < 8; ++i) {
     status  = sd_cmd(cmd0, sizeof(cmd0));
@@ -1316,17 +1411,77 @@ void cmd_read_sd() {
     printf("set block size failed!\n");
   }
   
-  status = sd_read(0, block, sizeof(block));
-  printf("read: %x\n", status);
+  status = sd_read(0, block, 512);
+  if (status) goto end;
   
-  for (int i = 0; i < 4; ++i) {
-    MbrPartition* part = (MbrPartition*)&block[446 + i * sizeof(MbrPartition)];
-    printf("%d: %d %d \n", i, part->first_lba, part->sectors);
-  }
+  uint32_t part1lba;
   
   // decode partition table
+  for (int i = 0; i < 4; ++i) {
+    MbrPart* part = (MbrPart*)&block[446 + i * sizeof(MbrPart)];
+    printf("%d: %d %d\n", i, part->first_lba, part->sectors);
+    //printf("test\n"); //(int)part->type, (int)part->status);
+    if (i == 0) part1lba = part->first_lba;
+  }
   
-
+  // decode FAT
+  status = sd_read(part1lba, block, 512);
+  if (status) goto end;
+  
+  uint32_t fat;
+  uint32_t rootCluster;
+  uint32_t clusterSize;
+  uint32_t dataStart;
+  
+  {
+    FatBootSector* bootsect = (FatBootSector*)block;
+    printf("fat: sector: %d cluster size: %d fats: %d reserved: %d\n",
+	   bootsect->bpb.bytesPerSector,
+	   bootsect->bpb.sectorsPerCluster,
+	   bootsect->bpb.fats,
+	   bootsect->bpb.reservedSectors);
+    fat = bootsect->bpb.reservedSectors;
+    clusterSize = 1 << bootsect->bpb.sectorsPerCluster;
+    printf("fat: root: %d, fat sectors: %d %d\n",
+	   bootsect->bpb.rootCluster,
+	   bootsect->bpb.sectorsPerFAT,
+	   bootsect->bpb.sectorsPerFAT2);
+    dataStart = bootsect->bpb.sectorsPerFAT2 * bootsect->bpb.fats;
+    rootCluster = bootsect->bpb.rootCluster;
+  }
+  
+  // decode FAT allocation
+  status = sd_read(part1lba + fat, block, 512);
+  if (status) goto end;
+  
+  {
+    // test print decode first cluster allocation
+    uint32_t* le32 = (uint32_t*)block;
+    for (int i = 0; i < 16; ++i) {
+      printf("%x ", le32[i]);
+    }
+    printf("\n");
+  }
+  
+  // decode root directory
+  if (rootCluster) {
+    //rootDir -= 2; // 0 and 1 reserverd, starts at 2!
+    printf("root dir cluster: %x, start: %d\n", rootCluster, dataStart);
+    status = sd_read(part1lba + fat + dataStart /*+ rootCluster * clusterSize */,
+		     block, sizeof(block));
+    if (status) goto end;
+    
+    FatDirEntry* dentry = (FatDirEntry*)block;
+    VFatDirEntry* ventry = (VFatDirEntry*)block;
+    for (int i = 0; i < sizeof(block) / sizeof(FatDirEntry); ++i) {
+      if (dentry[i].attributes == 0x0f)
+	printf("%d %d %.9s%.9s%.4s\n", i, ventry[i].sequence,
+	       ventry[i].name1, ventry[i].name2, ventry[i].name3);
+      else 
+	printf("%d %.9s.%.3s\n", i, dentry[i].filename, dentry[i].ext);
+    }
+  }
+  
  end:
   *spimmcOOB = 0xff; // OOB de-assert CS
 }
