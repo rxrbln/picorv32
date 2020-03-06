@@ -1187,7 +1187,7 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
 }
 
 uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
-  const bool sd_log = true;
+  const bool sd_log = false;
   static const int blocksize = 512;
   uint8_t status = 0;
   
@@ -1350,11 +1350,12 @@ struct FAT {
 
 // TODO: ClusterMap bits, of 12, 16, 32 ... little endian
 
-uint8_t block[512*2]; // TODO: one temp. test "cluster"
+uint8_t block[512/**2*/]; // TODO: one temp. test "cluster" and dynamic cluster size!
 
 uint8_t fat_read_cluster(FAT* fat, uint32_t cluster, uint8_t* data, int dlen) {
+  // TODO: check cluster >= 2!
   uint32_t addr = fat->fat + fat->dataStart + (cluster - 2) * fat->clusterSize;
-  printf("read cluster: %x, start: %d @ %d\n", cluster, fat->dataStart, addr);
+  printf("read cluster: %x, start: %d @ %d\n", cluster, fat->fat + fat->dataStart, addr);
   //cluster -= 2; // 0 and 1 reserverd, starts at 2!
   uint8_t status = sd_read(fat->partlba + addr, data, dlen);
   if (status) {
@@ -1362,6 +1363,8 @@ uint8_t fat_read_cluster(FAT* fat, uint32_t cluster, uint8_t* data, int dlen) {
   }
   return status;
 }
+
+static const bool fat_log = false;
 
 uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
   // decode FAT allocation
@@ -1376,16 +1379,18 @@ uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
 
   // test print decode first cluster allocation
   uint32_t* le32 = (uint32_t*)block;
-  printf("clusters:");
-  for (int i = 0; i < 512 / 4; ++i) {
-    printf(" %x", le32[i]);
-    if (i % 16 == 15) printf("\n");
+  if (fat_log) {
+    printf("clusters:");
+    for (int i = 0; i < 512 / 4; ++i) {
+      printf(" %x", le32[i]);
+      if (i % 16 == 15) printf("\n");
+    }
   }
   
   uint32_t ret = le32[off / 4] & 0xfffffff; // only 28 bit valid
-  printf("should ret: %x\n", ret);
+  if (fat_log) printf("should ret: %x\n", ret);
   
-  // free / end of list?
+  // defect / free / end of list?
   return (ret > 0xffffff8) ? 0 : ret;
 }
 
@@ -1482,7 +1487,7 @@ void cmd_read_sd() {
 	   bootsect->bpb.fats,
 	   bootsect->bpb.reservedSectors);
     fat.fat = bootsect->bpb.reservedSectors;
-    fat.clusterSize = 1 << bootsect->bpb.sectorsPerCluster; // in sectors
+    fat.clusterSize = bootsect->bpb.sectorsPerCluster; // in sectors
     printf("fat: root: %d, fat sectors: %d %d\n",
 	   bootsect->bpb.rootCluster,
 	   bootsect->bpb.sectorsPerFAT,
@@ -1502,8 +1507,23 @@ void cmd_read_sd() {
       if (dentry[i].attributes == 0x0f)
 	printf("%d %d %.9s%.9s%.4s\n", i, ventry[i].sequence,
 	       ventry[i].name1, ventry[i].name2, ventry[i].name3);
-      else 
-	printf("%d %.9s.%.3s\n", i, dentry[i].filename, dentry[i].ext);
+      else {
+	printf("%d ", i);
+	
+	switch (dentry[i].filename[0]) {
+	case 0: printf("EOF NULL\n"); i = sizeof(block) / sizeof(FatDirEntry); break;
+	case 0xe5: printf("DELETED ");
+	case 0x2e: printf("DOT Entry ");
+	default:
+	  printf("%.8s.%.3s",  dentry[i].filename, dentry[i].ext); break;
+	}
+	
+	if (dentry[i].attributes & 0x10)
+	  printf(" <DIR>");
+	
+	printf("\n");
+      }
+
     }
     
     cluster = fat_next_cluster(&fat, cluster);
