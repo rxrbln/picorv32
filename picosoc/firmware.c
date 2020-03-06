@@ -22,6 +22,14 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
+typedef long size_t;
+#include "libc/strncmp.c"
+
+#include "Endianess.hh"
+
+using Exact::EndianessConverter;
+using Exact::LittleEndianTraits;
+
 #ifdef ICEBREAKER
 #  define MEM_TOTAL 0x20000 /* 128 KB */
 #elif HX8KDEMO
@@ -527,7 +535,18 @@ void cmd_memtest(int ext)
 	volatile uint8_t *base_byte = (uint8_t *) (ext ? sdram : 0);
 	const int mem_total = ext ? 64*1024*1024 : MEM_TOTAL;
 	print("Running memtest ");
-
+	
+#if 1
+	*base_word = 0x12345678;
+	base_byte[3] = 0x67;
+	base_byte[1] = 0x23;
+	base_byte[2] = 0x45;
+	base_byte[0] = 0x01;
+	printf("%02x %02x %02x %02x\n",
+	       base_byte[0], base_byte[1], base_byte[2], base_byte[3]);
+	return;
+#endif
+	
 	// Walk in all w/ 3 increments, word access
 	if (ext)
 	for (int i = 1; i <= 1; i++) {
@@ -859,8 +878,6 @@ void cmd_echo()
 		putchar(c);
 }
 
-const uint16_t audiofile[] = {
-};
 
 const uint8_t vgmfile[] = {
 };
@@ -881,10 +898,23 @@ const uint16_t sn_vol_tab[16] = {
   5193,  4125,  3277,  2603,  2067,  1642,  1304,     0
 };
 
+int highmemsize = 0;
 
 void cmd_dac(uint8_t alt)
 {
   print("DAC & FM/VGM testing\n");
+  
+  const uint32_t* audiofile = (const uint32_t*)sdram;
+  //{};
+
+  uint8_t* highmem = (uint8_t*)audiofile;
+
+  //for (int i = 0; i < 16; ++i)  sdram[i] = i;
+  for (int i = 0; i < 16; ++i)
+    printf("%02x ", highmem[i]);
+  for (int i = 0; i < 16; ++i)
+    printf("%c", highmem[i]);
+
 /*
   uint16_t c;
 #if 1
@@ -902,10 +932,11 @@ void cmd_dac(uint8_t alt)
   //reg_fm[2] = (0x7000 << 16) | (882/2); // fm2
   //reg_fm[3] = (0x8000 << 16) | (alt ? 0x8000 | 16*80: 16*d120); // fm3 noise
   
-  
-  for (int i = 0; i < sizeof(audiofile) / sizeof(*audiofile);) {
-    reg_dac[0] = audiofile[i++]; // left
-    reg_dac[1] = audiofile[i++]; // right
+  uint32_t audiosize = highmemsize / sizeof(*audiofile); // sizeof(audiofile)
+  for (int i = 0; i < audiosize; ++i) {
+    uint32_t sample = audiofile[i];
+    reg_dac[0] = /*bswap_16*/(sample & 0xffff); // left
+    reg_dac[1] = /*bswap_16*/(sample >> 16); // right
   }
   //for (int i = 0; 1; ++i) reg_dac = i & 1 ? 0xffff : 0;
   reg_dac[0] = 0; // silence DAC
@@ -1115,16 +1146,18 @@ volatile uint8_t* spimmcOOB = (volatile uint8_t*)0x02000011; // invalid trunctat
 
 #define BIT(x) (1 << x)
 
+const bool sd_log = false;
+
 uint8_t sd_status() {
   uint8_t status;
   // wait for status
-  printf("status: ");
+  if (sd_log) printf("status: ");
   for (int i = 0; i < 16; ++i) {
     status = *spimmc;
-      printf(" %x", status);
-      // wait for stop bit to clear
-      if ((status & 0x80) == 0)
-	break;
+    if (sd_log) printf(" %x", status);
+    // wait for stop bit to clear
+    if ((status & 0x80) == 0)
+      break;
   }
   if (status && status != 0xff) {
     printf(":", status);
@@ -1136,8 +1169,9 @@ uint8_t sd_status() {
 	   status & BIT(2) ? " IllegalCommand" : "",
 	   status & BIT(1) ? " EraseReset" : "",
 	   status & BIT(0) ? " Idle" : "");
+    if (!sd_log) printf("\n");
   } else {
-    printf("\n");
+    if (sd_log) printf("\n");
   }
   
   return status;
@@ -1149,17 +1183,17 @@ uint8_t sd_cmd(uint8_t* cmd, int size, uint8_t* data = 0, int dsize = 0,
   cmd[size - 1] = crc7(cmd, size - 1) | 1; // stop bit
   for (int i = 0; i < size; ++i) {
     *spimmc8 = cmd[i];
-    printf("%02x", cmd[i]);
+    if (sd_log) printf("%02x", cmd[i]);
   }
-  printf(" - ");
+  if (sd_log) printf(" - ");
   uint8_t status = sd_status();
   // response payload
   if (dsize > 0 && (status == 0 || status == 1)) {
     for (int i = 0; i < dsize; ++i) {
       data[i] = *spimmc;
-      printf("%02x", data[i]);
+      if (sd_log) printf("%02x", data[i]);
     }
-    printf("\n");
+    if (sd_log) printf("\n");
   }
   
   if (!nodeassert)
@@ -1187,7 +1221,6 @@ uint8_t sd_acmd(uint8_t* acmd, int size, uint8_t* data, int dsize) {
 }
 
 uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
-  const bool sd_log = false;
   static const int blocksize = 512;
   uint8_t status = 0;
   
@@ -1224,12 +1257,6 @@ uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
 }
 
 
-
-#include "Endianess.hh"
-
-using Exact::EndianessConverter;
-using Exact::LittleEndianTraits;
-
 // +218 0x0000
 // +220 0x00		// orig. drive
 // +221 0x00		// sec
@@ -1254,6 +1281,7 @@ struct MbrPart {
 __attribute__((packed))
 #endif
 ;
+
 
 struct BiosParameterBlock {
   // DOS 2.0
@@ -1312,8 +1340,9 @@ struct FatDirEntry {
   char ext[3];
 
   uint8_t attributes;
-  uint8_t pad[10];
+  uint8_t pad[8];
   
+  EndianessConverter<uint16_t, LittleEndianTraits> highCluster;
   EndianessConverter<uint16_t, LittleEndianTraits> modTime;
   EndianessConverter<uint16_t, LittleEndianTraits> modDate;
   EndianessConverter<uint16_t, LittleEndianTraits> startCluster;
@@ -1352,10 +1381,13 @@ struct FAT {
 
 uint8_t block[512/**2*/]; // TODO: one temp. test "cluster" and dynamic cluster size!
 
+static const bool fat_log = false;
+
 uint8_t fat_read_cluster(FAT* fat, uint32_t cluster, uint8_t* data, int dlen) {
   // TODO: check cluster >= 2!
   uint32_t addr = fat->fat + fat->dataStart + (cluster - 2) * fat->clusterSize;
-  printf("read cluster: %x, start: %d @ %d\n", cluster, fat->fat + fat->dataStart, addr);
+  if (fat_log)
+    printf("read cluster: %x, start: %d @ %d\n", cluster, fat->fat + fat->dataStart, addr);
   //cluster -= 2; // 0 and 1 reserverd, starts at 2!
   uint8_t status = sd_read(fat->partlba + addr, data, dlen);
   if (status) {
@@ -1364,13 +1396,11 @@ uint8_t fat_read_cluster(FAT* fat, uint32_t cluster, uint8_t* data, int dlen) {
   return status;
 }
 
-static const bool fat_log = false;
-
 uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
   // decode FAT allocation
   uint32_t addr = (cluster * 4) / 512; // TODO: optimized & readable div & rem
   uint32_t off = cluster * 4 - addr * 512;
-  printf("FAT@: %d %d, for cluster: %d\n", addr, off, cluster);
+  if (fat_log) printf("FAT@: %d %d, for cluster: %d\n", addr, off, cluster);
   uint8_t status = sd_read(fat->partlba + fat->fat + addr, block, 512);
   if (status) {
     printf("fat_next_cluster: error: %x\n", status);
@@ -1395,6 +1425,8 @@ uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
 }
 
 void cmd_read_sd() {
+  uint32_t wavfile = 0;
+  
   printf("sd test\n");
   // our FPGA hardware auto inits with ~100 cycles before 1st cmd after reset!
   /*
@@ -1460,12 +1492,13 @@ void cmd_read_sd() {
   if (status) {
     printf("set block size failed!\n");
   }
-  
+
   status = sd_read(0, block, 512);
   if (status) goto end;
   
   FAT fat;
   uint32_t pstart;
+  
   // decode partition table
   for (int i = 0; i < 4; ++i) {
     MbrPart* part = (MbrPart*)&block[446 + i * sizeof(MbrPart)];
@@ -1521,12 +1554,58 @@ void cmd_read_sd() {
 	if (dentry[i].attributes & 0x10)
 	  printf(" <DIR>");
 	
+	if (strncmp(dentry[i].filename, "SONG61  WAV", 11) == 0) {
+	  printf(" !! MATCH !!");
+	  wavfile = (dentry[i].highCluster << 16) | dentry[i].startCluster;
+	}
 	printf("\n");
       }
-
     }
     
     cluster = fat_next_cluster(&fat, cluster);
+  }
+  
+  if (wavfile) {
+    printf("WAV file: %d\n", wavfile);
+    
+    int i = 0;
+    uint8_t* highmem = (uint8_t*)sdram;
+    highmemsize = 0;
+    while (wavfile) {
+      printf(".");
+      status = fat_read_cluster(&fat, wavfile, highmem, sizeof(block));
+      if (status) {
+	printf("WAV read error: %x\n", status);
+      }
+      
+#if 0
+      // manual copy to test byte swaping?
+      for (int i = 0; i < sizeof(block) / 4; ++i) {
+	((uint32_t*)highmem)[i] = ((uint32_t*)block)[i];
+      }
+     #endif
+#if 0
+      //for (int i = 0; i < 16; ++i)  sdram[i] = i;
+      for (int i = 0; i < 16; ++i)
+	printf("%02x (%02x) ", highmem[i], block[i]);
+#endif
+      
+      highmem += sizeof(block);
+      highmemsize += sizeof(block);
+      wavfile = fat_next_cluster(&fat, wavfile);
+      if (!wavfile)
+	printf("EOF\n");
+      
+      //if (++i > 2000) break;
+    }
+#if 0
+    highmem = (uint8_t*)sdram;
+    //for (int i = 0; i < 16; ++i)  sdram[i] = i;
+    for (int i = 0; i < 16; ++i)
+      printf("%02x ", highmem[i]);
+    for (int i = 0; i < 16; ++i)
+      printf("%c", highmem[i]);
+#endif
   }
   
  end:
