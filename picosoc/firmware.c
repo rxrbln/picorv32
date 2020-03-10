@@ -186,6 +186,29 @@ void enable_flash_crm()
 
 uint8_t scroll = 0;
 
+void do_scroll() {
+  ++vgay;
+  vgax = 0;
+  if (vgay >= 30){
+    if (!scroll) {
+      vgay = 0; // simply wrap
+    } else {
+      // scroll
+      for (vgay = 0; vgay < 30 - scroll; ++vgay)
+	for (int x = 0; x < 80; ++x)
+	  vga_vram[vgay * 128 + x] = vga_vram[(vgay + scroll) * 128 + x];
+      // clear lines after curret, only for scroll > 1
+      for (int y = vgay + 1; y < 30; ++y)
+	for (int x = 0; x < 80; ++x)
+	  vga_vram[y * 128 + x] = 0;
+    }
+  }
+  
+  // clear last, new line
+  for (int x = 0; x < 80; ++x)
+    vga_vram[vgay * 128 + x] = 0;
+}
+
 void putchar(char c)
 {
   if (c == '\n')
@@ -197,34 +220,17 @@ void putchar(char c)
   vga_vram[2] = 0x2900 | '3';
   vga_vram[3] = 0x8500 | '\xfd';
 
-  if (c != '\n' && c != '\r')
-  vga_vram[vgay * 128 + vgax++] =
-    //(c == 'E' ? 0xe200 : 0x700)
-    //(vgax + 1) << 8
-    0x700 // color attribute: white on black
-    | c;
-  
-  if (c == '\n') {
-    vgax = 0;
-    ++vgay;
-    if (vgay >= 30){
-      if (!scroll) {
-	vgay = 0; // simply wrap
-      } else {
-	// scroll
-	for (vgay = 0; vgay < 30 - scroll; ++vgay)
-	  for (int x = 0; x < 80; ++x)
-	    vga_vram[vgay * 128 + x] = vga_vram[(vgay + scroll) * 128 + x];
-	// clear lines after curret, only for scroll > 1
-	for (int y = vgay + 1; y < 30; ++y)
-	  for (int x = 0; x < 80; ++x)
-	    vga_vram[y * 128 + x] = 0;
-      }
-    }
+  if (c != '\n' && c != '\r') {
+    if (vgax == 80) do_scroll();
     
-    // clear last, new line
-    for (int x = 0; x < 80; ++x)
-      vga_vram[vgay * 128 + x] = 0;
+    vga_vram[vgay * 128 + vgax++] =
+      //(c == 'E' ? 0xe200 : 0x700)
+      //(vgax + 1) << 8
+      0x700 // color attribute: white on black
+      | c;
+  }
+  if (c == '\n') {
+    do_scroll();
   }
 #endif
   reg_uart_data = c;
@@ -1379,7 +1385,9 @@ struct FAT {
 
 // TODO: ClusterMap bits, of 12, 16, 32 ... little endian
 
+uint32_t cached = 0;
 uint8_t block[512/**2*/]; // TODO: one temp. test "cluster" and dynamic cluster size!
+uint8_t block2[512/**2*/]; // TODO: one temp. test "cluster" and dynamic cluster size!
 
 static const bool fat_log = false;
 
@@ -1401,14 +1409,20 @@ uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
   uint32_t addr = (cluster * 4) / 512; // TODO: optimized & readable div & rem
   uint32_t off = cluster * 4 - addr * 512;
   if (fat_log) printf("FAT@: %d %d, for cluster: %d\n", addr, off, cluster);
-  uint8_t status = sd_read(fat->partlba + fat->fat + addr, block, 512);
-  if (status) {
-    printf("fat_next_cluster: error: %x\n", status);
-    return 0;
-  };
+  addr += fat->fat;
+  if (addr == cached) {
+    if (fat_log) printf("cached: %x\n", cached);
+  } else {
+    uint8_t status = sd_read(fat->partlba + addr, block2, sizeof(block2));
+    if (status) {
+      printf("fat_next_cluster: error: %x\n", status);
+      return 0;
+    };
+    cached = addr;
+  }
 
   // test print decode first cluster allocation
-  uint32_t* le32 = (uint32_t*)block;
+  uint32_t* le32 = (uint32_t*)block2;
   if (fat_log) {
     printf("clusters:");
     for (int i = 0; i < 512 / 4; ++i) {
