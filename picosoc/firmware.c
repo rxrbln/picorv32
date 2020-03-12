@@ -1392,11 +1392,10 @@ uint8_t block2[512/**2*/]; // TODO: one temp. test "cluster" and dynamic cluster
 static const bool fat_log = false;
 
 uint8_t fat_read_cluster(FAT* fat, uint32_t cluster, uint8_t* data, int dlen) {
-  // TODO: check cluster >= 2!
+  // TODO: check cluster >= 2! // 0 and 1 reserverd, starts at 2!
   uint32_t addr = fat->fat + fat->dataStart + (cluster - 2) * fat->clusterSize;
   if (fat_log)
     printf("read cluster: %x, start: %d @ %d\n", cluster, fat->fat + fat->dataStart, addr);
-  //cluster -= 2; // 0 and 1 reserverd, starts at 2!
   uint8_t status = sd_read(fat->partlba + addr, data, dlen);
   if (status) {
     printf("fat_read_cluster: error: %x\n", status);
@@ -1438,8 +1437,77 @@ uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
   return (ret > 0xffffff8) ? 0 : ret;
 }
 
+FAT fat;
+uint32_t fddb; // File Descriptor DB
+
+int open(const char* pathname, int flags = 0)
+{
+  //printf("open\n");
+  // decode root directory, TODO: descent into chils directories
+  for (uint32_t cluster = fat.rootCluster; cluster;) {
+    int status = fat_read_cluster(&fat, cluster, block, sizeof(block));
+    if (status) return -1; // TODO: set errno
+    
+    FatDirEntry* dentry = (FatDirEntry*)block;
+    VFatDirEntry* ventry = (VFatDirEntry*)block;
+    for (int i = 0; i < sizeof(block) / sizeof(FatDirEntry); ++i) {
+      if (dentry[i].attributes == 0x0f)
+	printf("%d %d %.9s%.9s%.4s\n", i, ventry[i].sequence,
+	       ventry[i].name1, ventry[i].name2, ventry[i].name3);
+      else {
+	printf("%d ", i);
+	
+	switch (dentry[i].filename[0]) {
+	case 0: printf("EOF NULL\n"); i = sizeof(block) / sizeof(FatDirEntry); break;
+	case 0xe5: printf("DELETED ");
+	case 0x2e: printf("DOT Entry ");
+	default:
+	  printf("%.8s.%.3s",  dentry[i].filename, dentry[i].ext); break;
+	}
+	
+	if (dentry[i].attributes & 0x10)
+	  printf(" <DIR>");
+	
+	if (strncmp(dentry[i].filename, pathname, 11) == 0) {
+	  printf(" !! MATCH !!\n");
+	  // TODO: register and return fd dictionary
+	  fddb = (dentry[i].highCluster << 16) | dentry[i].startCluster;
+	  return fddb;
+	}
+	printf("\n");
+      }
+    }
+    
+    cluster = fat_next_cluster(&fat, cluster);
+  }
+  
+  return 0;
+}
+
+size_t read(int fd, void* buf, size_t count)
+{
+  //printf("read\n");
+
+  // TODO: support abritrary unaligned sizes
+  int status = fat_read_cluster(&fat, fddb, (uint8_t*)buf, count);
+  if (status)
+    return -1;
+  
+  fddb = fat_next_cluster(&fat, fddb);
+  
+  return count;
+}
+
+int close(int fd)
+{
+  //printf("close\n");
+
+  // TODO: remove from fd dictionary
+  return 0;
+}
+
 void cmd_read_sd() {
-  uint32_t wavfile = 0;
+  int wavfile = 0;
   
   printf("sd test\n");
   // our FPGA hardware auto inits with ~100 cycles before 1st cmd after reset!
@@ -1510,10 +1578,8 @@ void cmd_read_sd() {
   status = sd_read(0, block, 512);
   if (status) goto end;
   
-  FAT fat;
-  uint32_t pstart;
-  
   // decode partition table
+  uint32_t pstart;
   for (int i = 0; i < 4; ++i) {
     MbrPart* part = (MbrPart*)&block[446 + i * sizeof(MbrPart)];
     printf("%d: %d %d\n", i, part->first_lba, part->sectors);
@@ -1543,83 +1609,26 @@ void cmd_read_sd() {
     fat.rootCluster = bootsect->bpb.rootCluster;
   }
   
-  // decode root directory
-  for (uint32_t cluster = fat.rootCluster; cluster;) {
-    status = fat_read_cluster(&fat, cluster, block, sizeof(block));
-    if (status) goto end;
-    
-    FatDirEntry* dentry = (FatDirEntry*)block;
-    VFatDirEntry* ventry = (VFatDirEntry*)block;
-    for (int i = 0; i < sizeof(block) / sizeof(FatDirEntry); ++i) {
-      if (dentry[i].attributes == 0x0f)
-	printf("%d %d %.9s%.9s%.4s\n", i, ventry[i].sequence,
-	       ventry[i].name1, ventry[i].name2, ventry[i].name3);
-      else {
-	printf("%d ", i);
-	
-	switch (dentry[i].filename[0]) {
-	case 0: printf("EOF NULL\n"); i = sizeof(block) / sizeof(FatDirEntry); break;
-	case 0xe5: printf("DELETED ");
-	case 0x2e: printf("DOT Entry ");
-	default:
-	  printf("%.8s.%.3s",  dentry[i].filename, dentry[i].ext); break;
-	}
-	
-	if (dentry[i].attributes & 0x10)
-	  printf(" <DIR>");
-	
-	if (strncmp(dentry[i].filename, "SONG61  WAV", 11) == 0) {
-	  printf(" !! MATCH !!");
-	  wavfile = (dentry[i].highCluster << 16) | dentry[i].startCluster;
-	}
-	printf("\n");
-      }
-    }
-    
-    cluster = fat_next_cluster(&fat, cluster);
-  }
   
+  wavfile = open("SONG61  WAV");
   if (wavfile) {
     printf("WAV file: %d\n", wavfile);
     
     int i = 0;
     uint8_t* highmem = (uint8_t*)sdram;
     highmemsize = 0;
-    while (wavfile) {
+    size_t ret = 0;
+    while (ret >= 0) {
       printf(".");
-      status = fat_read_cluster(&fat, wavfile, highmem, sizeof(block));
-      if (status) {
-	printf("WAV read error: %x\n", status);
+      
+      ret = read(wavfile, highmem, sizeof(block));
+      if (ret >= 0) {
+	highmem += sizeof(block);
+	highmemsize += sizeof(block);
       }
-      
-#if 0
-      // manual copy to test byte swaping?
-      for (int i = 0; i < sizeof(block) / 4; ++i) {
-	((uint32_t*)highmem)[i] = ((uint32_t*)block)[i];
-      }
-     #endif
-#if 0
-      //for (int i = 0; i < 16; ++i)  sdram[i] = i;
-      for (int i = 0; i < 16; ++i)
-	printf("%02x (%02x) ", highmem[i], block[i]);
-#endif
-      
-      highmem += sizeof(block);
-      highmemsize += sizeof(block);
-      wavfile = fat_next_cluster(&fat, wavfile);
-      if (!wavfile)
-	printf("EOF\n");
-      
-      //if (++i > 2000) break;
     }
-#if 0
-    highmem = (uint8_t*)sdram;
-    //for (int i = 0; i < 16; ++i)  sdram[i] = i;
-    for (int i = 0; i < 16; ++i)
-      printf("%02x ", highmem[i]);
-    for (int i = 0; i < 16; ++i)
-      printf("%c", highmem[i]);
-#endif
+    printf("EOF\n");
+    close(wavfile);
   }
   
  end:
