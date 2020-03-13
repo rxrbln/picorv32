@@ -1488,6 +1488,10 @@ size_t read(int fd, void* buf, size_t count)
 {
   //printf("read\n");
 
+  // eoyf?
+  if (!fddb)
+    return -1;
+  
   // TODO: support abritrary unaligned sizes
   int status = fat_read_cluster(&fat, fddb, (uint8_t*)buf, count);
   if (status)
@@ -1507,7 +1511,7 @@ int close(int fd)
 }
 
 void cmd_read_sd() {
-  int wavfile = 0;
+  int file = 0;
   
   printf("sd test\n");
   // our FPGA hardware auto inits with ~100 cycles before 1st cmd after reset!
@@ -1608,27 +1612,84 @@ void cmd_read_sd() {
     fat.dataStart = bootsect->bpb.sectorsPerFAT2 * bootsect->bpb.fats;
     fat.rootCluster = bootsect->bpb.rootCluster;
   }
-  
-  
-  wavfile = open("SONG61  WAV");
-  if (wavfile) {
-    printf("WAV file: %d\n", wavfile);
+
+  file = open("MONKEY  TGA");
+  if (file) {
+    printf("TGA file: %d\n", file);
     
-    int i = 0;
+    size_t ret = 0;
+    int header = 0;
+    int x = 0, y = 199; // read bottom-up :-/
+    int p = 0;
+
+    volatile uint32_t* vga_ctrl = (volatile uint32_t*)0x808ffffc;
+    volatile uint32_t* vga_pal =  (volatile uint32_t*)0x80810000;
+    
+    *vga_ctrl = 1;
+#if 1
+    // test gray palette
+    for (int i = 0; i < 256; ++i) {
+      //printf("pal: %d %x\n", i, vga_pal[i]);
+      vga_pal[i] = (i << 16) | (i << 8) | (i << 0);
+    }
+#endif
+    
+    while (ret >= 0) {
+      printf(".");
+      
+      ret = read(file, block, sizeof(block));
+      if (ret >= 0) {
+	int j = 0;
+	if (header == 0) {
+	  // skip 18, rest palette
+	  for (j = 18; j < 512; j += 3) {
+	    vga_pal[p++] = (block[j+2] << 16) | (block[j+1] << 8) | (block[j+0] << 0);
+	  }
+	} else if (header == 1) {
+	  // 768 - 512 - 18 still palette
+	  for (j = 1; j < 274; j += 3) {
+	    vga_pal[p++] = (block[j+3] << 16) | (block[j+1] << 8) | (block[j+0] << 0);
+	  }
+	}
+	
+	// any remaining pixel data until EOF trailer
+	for (; y >= 0 && j < 512; j += 2) {
+	  uint16_t v = *((uint16_t*)&block[j]);
+	  vga_vram[y * 160 + x++] = bswap_16(v);
+	  if (x >= 160) {
+	    --y;
+	    x = 0;
+	  }
+	}
+	++header;
+      }
+      
+    }
+    
+    printf("EOF\n");
+    close(file); file = 0;
+  }
+
+  goto end;
+
+  file = open("SONG61  WAV");
+  if (file) {
+    printf("WAV file: %d\n", file);
+    
     uint8_t* highmem = (uint8_t*)sdram;
     highmemsize = 0;
     size_t ret = 0;
     while (ret >= 0) {
       printf(".");
       
-      ret = read(wavfile, highmem, sizeof(block));
+      ret = read(file, highmem, sizeof(block));
       if (ret >= 0) {
 	highmem += sizeof(block);
 	highmemsize += sizeof(block);
       }
     }
     printf("EOF\n");
-    close(wavfile);
+    close(file); file = 0;
   }
   
  end:
