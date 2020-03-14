@@ -59,8 +59,8 @@ extern uint32_t sram;
 #define reg_fm ((volatile uint32_t*)0x40000010)
 #define reg_fm16 ((volatile uint16_t*)0x40000010)
 
-static uint32_t* vga_vram = (uint32_t*)0x80000000;
-static uint32_t* vga_font = (uint32_t*)0x80002000;
+static uint16_t* vga_vram = (uint16_t*)0x80000000;
+static uint16_t* vga_font = (uint16_t*)0x80002000;
 
 static volatile uint32_t* sdram = (uint32_t*)0x20000000;
 
@@ -1655,7 +1655,7 @@ void cmd_read_sd() {
 	// any remaining pixel data until EOF trailer
 	for (; y >= 0 && j < 512; j += 2) {
 	  uint16_t v = *((uint16_t*)&block[j]);
-	  vga_vram[y * 160 + x++] = bswap_16(v);
+	  vga_vram[y * 160 + x++] = v;
 	  if (x >= 160) {
 	    --y;
 	    x = 0;
