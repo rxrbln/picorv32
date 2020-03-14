@@ -25,7 +25,7 @@
 
 // TODO: parameterize width, and size
 module dpram #(parameter integer WORDS = 1024,
-	       parameter INITFILE = "charset16.hex",)
+	       parameter INITFILE = "charset32.hex",)
 (
    input clk, wen, ren,
    input [15:0] waddr, raddr,
@@ -174,7 +174,7 @@ module vga(
    reg [15:0] vramraddr;
    reg [15:0] vramwaddr;
    
-   dpram #(.WORDS(32768),
+   dpram #(.WORDS(32768/2),
 	   .INITFILE("lena256.hex"),)
    vram (
       .clk(pixclk),
@@ -196,7 +196,7 @@ module vga(
    reg [10:0] fontwaddr;
    reg [10:0] fontraddr;
    
-   dpram #(.INITFILE("charset16.hex"),) // "320240bw2.hex"
+   dpram #(.INITFILE("charset32.hex"),) // "320240bw2.hex"
    fontram (
       .clk(pixclk),
       .ren(fontren),
@@ -210,15 +210,15 @@ module vga(
 
    // text or graphic mode?
    reg [3:0] gfxmode = 0; // bit depth
-   //wire [3:0] pxpreload;
-   //assign pxpreload = 4'd31; // 32 >> (gfxmode)
+   // TODO: dynamic bit-depth pre-load and shifting
+   // wire [3:0] pxpreload;
+   // assign pxpreload = 4'd31; // 32 >> (gfxmode)
 
    reg [31:0] pxdata;
    reg [7:0]  attr;
    reg [7:0]  row;
    
-   wire [7:0] mask;
-   assign mask = 8'b10000000 >> xpos[2:0];
+   wire [7:0] mask = 8'b10000000 >> xpos[2:0];
 
    // text mode, only load every 8 pixels
 
@@ -315,12 +315,17 @@ module vga(
 	       vramren <= 1;
 	    end else if (xpos[2:0] == 5) begin
 	       vramren <= 0;
-	       fontraddr <= {textHiWord ? vramrdata[23:16] : vramrdata[7:0], ypos[3:1]};
+	       fontraddr <= {textHiWord ? vramrdata[23:16] : vramrdata[7:0], ypos[3:2]};
 	       fontren <= 1;
 	    end else if (xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       fontren <= 0;
-	       row <= ypos[0] ? fontrdata[15:8] : fontrdata[7:0];
+	       case (ypos[1:0])
+		 2'b00: row <= fontrdata[ 7: 0];
+		 2'b01: row <= fontrdata[15: 8];
+		 2'b10: row <= fontrdata[23:16];
+		 2'b11: row <= fontrdata[31:24];
+	       endcase
 	       attr <= textHiWord ? vramrdata[31:24] : vramrdata[15:8];
 	    end
 	    
