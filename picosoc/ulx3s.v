@@ -41,6 +41,12 @@ module attosoc (
 	output flash_wpn,
 	output flash_holdn,
 
+	// SD card
+	output sd_clk,
+	output sd_csn, // dat3
+	output sd_mosi, // dat0
+	input sd_miso, // cmd
+
 	// sd memory
 	output sdram_csn,       // chip select
 	output sdram_clk,       // clock to SDRAM
@@ -62,7 +68,7 @@ module attosoc (
 
 	parameter integer MEM_WORDS = 32768;
 	parameter [31:0] STACKADDR = 32'h 0000_0000 + (4*MEM_WORDS);       // end of memory
-	parameter [31:0] PROGADDR_RESET = 32'h 0020_0000; // 2 MB into flash
+	parameter [31:0] PROGADDR_RESET = 32'h 0040_0000; // 4 MB into flash
 
 	reg [31:0] ram [0:MEM_WORDS-1];
 	//initial $readmemh("ulx3s_fw.hex", ram);
@@ -143,7 +149,7 @@ module attosoc (
     .clkref(clk),
     .init(!resetn),
     // cpu/chipset interface
-    .addr(mem_addr),
+    .addr(mem_addr[25:0]),
     .we(sdram_write),
     .dqm(~mem_wstrb),
     .din(mem_wdata),
@@ -152,6 +158,39 @@ module attosoc (
     .ready(sdram_ready),
   );
 
+        // internal logic analizer scope debug buffer
+        wire debug_sel = iomem_valid && iomem_addr[28]; // 4th MSB for a test
+        wire [31:0] debug_rdata;
+        wire 	   debug_ready;
+
+   
+        // SD-SPI
+      	wire        spimmc_sel = mem_valid && (mem_addr == 32'h 0200_0010);
+        wire 	    spimmc_ready;
+	wire [31:0] spimmc_rdata;
+
+        spimmc spimmmc (
+   	   .clk(clk),
+	   .reset(!resetn),
+	   .valid(spimmc_sel),
+	   .ready(spimmc_ready),
+	   .wdata(mem_wdata),
+	   // as we write out MSB first, needs writes from MSB, use byte 2 for OOB deselect!
+	   .wdata_cnt(mem_wstrb[0] ? 32 : mem_wstrb[2] ? 16 : mem_wstrb[3] ? 8 : mem_wstrb[1] ? 255 : 0),
+	   .rdata(spimmc_rdata),
+
+	   .spi_csn(sd_csn),
+	   .spi_sclk(sd_clk),
+	   .spi_mosi(sd_mosi),
+	   .spi_miso(sd_miso),
+
+	   // Logic Analyzer
+	   .log_sel(debug_sel),
+	   .log_addr(iomem_addr[20:0]),
+	   .log_rdata(debug_rdata),
+	   .log_ready(debug_ready),
+       );
+   
 
        // flash quad-SPI bi-directional output-enable
        wire flash_io0_oe, flash_io0_do, flash_io0_di;
@@ -232,15 +271,19 @@ module attosoc (
 
 	assign mem_ready = (iomem_valid && iomem_ready) ||
 			   spimem_ready || spimemio_cfgreg_sel ||
-	                   simpleuart_reg_div_sel ||
+			   simpleuart_reg_div_sel ||
 			   (simpleuart_reg_dat_sel && !simpleuart_reg_dat_wait) ||
+			   debug_ready ||
+			   spimmc_ready ||
 			   ram_ready;
 
 	assign mem_rdata = (iomem_valid && iomem_ready) ? iomem_rdata :
 			   simpleuart_reg_div_sel ? simpleuart_reg_div_do :
 			   simpleuart_reg_dat_sel ? simpleuart_reg_dat_do :
+			   debug_ready ? debug_rdata :
 			   spimem_ready ? spimem_rdata :
 			   spimemio_cfgreg_sel ? spimemio_cfgreg_do :
+			   spimmc_ready ? spimmc_rdata :
  			   ram_rdata;
 
 	picorv32 #(
@@ -298,7 +341,7 @@ module attosoc (
 		     );
 
       	reg vgamem_ready;
-   	wire vgamem_sel = iomem_valid && iomem_addr[31]; // high bit set
+   	wire vgamem_sel = iomem_valid && iomem_addr[31]; // 1st, high bit set
 	reg [31:0] vgamem_rdata;
         // vga core
         vga vga (
@@ -391,7 +434,7 @@ module ulx3s(
     output [7:0] led,
     output ftdi_rxd,
     input ftdi_txd,
-    output wifi_gpio0,
+    output wifi_en,
 
     // SPI flash
     output flash_csn,
@@ -400,6 +443,18 @@ module ulx3s(
     output flash_wpn,
     output flash_holdn,
 
+    // SD card
+    output sd_clk,
+    input sd_d0, // dat0..3 incl. di
+    output sd_d3, // dat0..3 incl. di
+    output sd_cmd, // do
+
+    // ADC
+    /* output adc_sclk,
+    inout  adc_miso,
+    output adc_mosi,
+    output adc_csn, */
+    
     // analog audio
     output [3:0] audio_l,
     output [3:0] audio_r,
@@ -420,7 +475,7 @@ module ulx3s(
     inout [15:0] sdram_d,   // data bus to/from SDRAM
 );
    
-   assign wifi_gpio0 = 1'b1;
+   assign wifi_en = 1'b0;
 
    wire sysclk; // higher system clock
    wire clk;
@@ -451,6 +506,7 @@ attosoc soc(
     .gpdi_dp(gpdi_dp),
     .gpdi_dn(gpdi_dn),
 
+    // spi flash
     .flash_csn(flash_csn),
     .flash_sck(flash_sck),
     .flash_mosi(flash_mosi),
@@ -458,6 +514,19 @@ attosoc soc(
     .flash_holdn(flash_holdn),
     .flash_wpn(flash_wpn),
 
+    // sd card
+    .sd_clk(sd_clk),
+    .sd_csn(sd_d3),
+    .sd_mosi(sd_cmd),
+    .sd_miso(sd_d0),
+    
+    // ADC
+    /*.sd_clk(adc_sclk),
+    .sd_csn(adc_csn),
+    .sd_mosi(adc_mosi),
+    .sd_miso(adc_miso), */
+     
+    // sdram
     .sdram_csn(sdram_csn),
     .sdram_clk(sdram_clk),
     .sdram_cke(sdram_cke),
