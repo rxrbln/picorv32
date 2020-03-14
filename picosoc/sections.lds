@@ -10,7 +10,7 @@
 
 MEMORY {
 #ifdef ULX3S
-    FLASH (rx)      : ORIGIN = 0x00200000, LENGTH = 0xE00000 /* entire flash, 14 MiB */
+    FLASH (rx)      : ORIGIN = 0x00400000, LENGTH = 0xC00000 /* entire flash, 12 MiB */
 #else
     FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0xE00000 /* entire flash, 14 MiB */
 #endif
