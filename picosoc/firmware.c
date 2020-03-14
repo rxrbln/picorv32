@@ -1822,17 +1822,19 @@ void main()
 				break;
 			case 's':
 			        cmd_read_sd();
-			        //scroll ^= 2; // or 1
 				break;
 			case 'd':
 			case 'D':
 				cmd_dac(cmd == 'D');
 				break;
+			case ' ':
+			        scroll ^= 2; // or 1
+				break;
 			case 'g':
 			case 'G':
 			        {
 				  volatile uint32_t* vga_ctrl = (volatile uint32_t*)0x808ffffc;
-				  *vga_ctrl ^= 1;
+				  *vga_ctrl = (*vga_ctrl & 1) ^ 1;
 				  if (cmd == 'g') {
 				    for (int y = 0; y < 240; ++y)
 				      vga_vram[y*320/8/2] = 0b1110001000000000;
