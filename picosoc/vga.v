@@ -24,24 +24,26 @@
  */
 
 // TODO: parameterize width, and size
-module dpram #(parameter integer WORDS = 2048,
+module dpram #(parameter integer WORDS = 1024,
 	       parameter INITFILE = "charset16.hex",)
 (
    input clk, wen, ren,
    input [15:0] waddr, raddr,
-   input [15:0] wdata,
-   output reg [15:0] rdata,
+   input [31:0] wdata,
+   input [3:0] wstrb,
+   output reg [31:0] rdata,
 );
-   reg [15:0] mem [0:WORDS-1];
+   reg [31:0] mem [0:WORDS-1];
 
    // xxd -p < lena-1.raw | sed "s/\(..\)\(..\)/\2\1\n/g"
    initial $readmemh(INITFILE, mem, 0);
 
    always @(posedge clk) begin
-      if (wen)
-        mem[waddr] <= wdata;
-      if (ren)
-        rdata <= mem[raddr];
+      if (wen && wstrb[0]) mem[waddr][ 7: 0] <= wdata[ 7: 0];
+      if (wen && wstrb[1]) mem[waddr][15: 8] <= wdata[15: 8];
+      if (wen && wstrb[2]) mem[waddr][23:16] <= wdata[23:16];
+      if (wen && wstrb[3]) mem[waddr][31:24] <= wdata[31:24];
+      if (ren) rdata <= mem[raddr];
    end
 endmodule
 
@@ -166,10 +168,11 @@ module vga(
 
    reg 	vramwen = 0;
    reg 	vramren = 0;
-   wire [15:0] vramrdata;
-   reg [15:0] vramwdata;
-   reg [15:0] vramwaddr;
+   wire [31:0] vramrdata;
+   reg [31:0] vramwdata;
+   reg [3:0] vramwstrb;
    reg [15:0] vramraddr;
+   reg [15:0] vramwaddr;
    
    dpram #(.WORDS(32768),
 	   .INITFILE("lena256.hex"),)
@@ -181,12 +184,15 @@ module vga(
       .waddr(vramwaddr),
       .rdata(vramrdata),
       .wdata(vramwdata),
+      .wstrb(vramwstrb),
    );
 
    reg 	fontwen = 0;
    reg 	fontren = 0;
-   wire [15:0] fontrdata;
-   reg [15:0] fontwdata;
+   wire [31:0] fontrdata;
+   reg [31:0] fontwdata;
+   reg [3:0] fontwstrb;
+   
    reg [10:0] fontwaddr;
    reg [10:0] fontraddr;
    
@@ -199,14 +205,15 @@ module vga(
       .waddr(fontwaddr),
       .rdata(fontrdata),
       .wdata(fontwdata),
+      .wstrb(fontwstrb),
     );
 
    // text or graphic mode?
    reg [3:0] gfxmode = 0; // bit depth
-   wire [3:0] pxpreload;
-   assign pxpreload = 4'd13; // 16 >> (gfxmode)
+   //wire [3:0] pxpreload;
+   //assign pxpreload = 4'd31; // 32 >> (gfxmode)
 
-   reg [15:0] pxdata;
+   reg [31:0] pxdata;
    reg [7:0]  attr;
    reg [7:0]  row;
    
@@ -278,9 +285,12 @@ module vga(
    reg cursp0;
    reg cursp1;
 
-   wire needsread = wstrb[3:0] != 4'hf;
+   wire isread = wstrb[3:0] != 4'hf;
    wire iswrite = wstrb[3:0] != 4'h0;
    reg 	readready = 0;
+   
+   wire [15:0] textAddr = ((ypos & 16'hFFF0) << 3) | ((xpos[15:0] + 7) >> 3);
+   wire textHiWord = textAddr & 1;
    
    // ----------------------------------------------------------------------------
    // Video output
@@ -301,17 +311,17 @@ module vga(
 	    if (xpos[2:0] == 3) begin
 	       // load char index from vram, * 256 bytes, 128 "words" per row
 	       // interleaved text color attribute
-	       vramraddr <= ((ypos & 16'hFFF0) << 3) | ((xpos[15:0] + 7) >> 3);
+	       vramraddr <= textAddr >> 1;
 	       vramren <= 1;
 	    end else if (xpos[2:0] == 5) begin
 	       vramren <= 0;
-	       fontraddr <= {vramrdata[7:0], ypos[3:1]};
+	       fontraddr <= {textHiWord ? vramrdata[23:16] : vramrdata[7:0], ypos[3:1]};
 	       fontren <= 1;
 	    end else if (xpos[2:0] == 7) begin
 	       // transfer pre-loaded at begin of each pixel
 	       fontren <= 0;
 	       row <= ypos[0] ? fontrdata[15:8] : fontrdata[7:0];
-	       attr <= vramrdata[15:8];
+	       attr <= textHiWord ? vramrdata[31:24] : vramrdata[15:8];
 	    end
 	    
 	    if (row & mask && (!blink || frame & 5'b10000)) begin
@@ -330,28 +340,28 @@ module vga(
 	      ipos <= ipos + xpos[0]; // "double scan" every 2nd pixel
 	    
 	    // graphic mode: pre-load every N pixels
-	    if (xpos[0] == 1) begin // TODO: gfxpreload
+	    if (xpos[1:0] == 3) begin // TODO: gfxpreload
 	       // generate RAM addres to load px from vram
 	       if (!ipos[16]) begin // ipos[15:4] < 4096
-		  vramraddr <= ipos[15:1]; // 8bpp -> / 16
+		  vramraddr <= ipos[15:2]; // 8bpp -> / 16
 		  vramren <= 1;
 	       end else begin
-		  fontraddr <= ipos[14:4]; // 1bpp -> / 16
+		  fontraddr <= ipos[14:2]; // 1bpp -> / 16
 		  fontren <= 1;
 	       end
-	    end else if (xpos[0] == 0) begin
+	    end else if (xpos[1:0] == 0) begin
 	       // transfer pre-loaded at begin of each pixel
 	       if (!ipos[16]) begin // ipos[15:4] < 4096
 		  vramren <= 0;
-		  pxdata = vramrdata[15:0];
+		  pxdata = vramrdata;
 	       end else begin
 		  fontren <= 0;
-		  pxdata = fontrdata[15:0];
+		  pxdata = fontrdata;
 	       end
 	    end
 
 	    // TODO: dynamic shift gfxmode
-	    col = pxdata >> (ipos[0] ? 0 : 8);
+	    col = pxdata >> (8 * ipos[1:0]);
 	 end
 	 
 	 fb_rgb = pal[col];
@@ -412,40 +422,40 @@ module vga(
 	       if (addr[17]) begin
 		  //  // 2nd "bank" FONT
 		  // MUX read access
-		  if (needsread && xpos[2:0] == 0) begin
+		  if (isread && xpos[2:0] == 0) begin
 		     fontren <= 1;
 		     fontraddr <= addr[12:2];
-		  end else if (needsread && fontren && xpos[2:0] == 2) begin
+		  end else if (isread && fontren && xpos[2:0] == 2) begin
 		     // the riscv core runs half the clock
 		     // w/o read buffer we get some glitches
 		     fontren <= 0;
-		     vga_rdata[15:0] <= fontrdata[15:0];
+		     vga_rdata[31:0] <= fontrdata[31:0];
 		     readready <= 1;
 		     vga_ready <= !iswrite; // micro optimization
-		  end else if (!needsread || (needsread && readready)) begin
+		  end else if (!isread || (isread && readready)) begin
 		     fontwen <= iswrite;
 		     fontwaddr <= addr[13:2];
-		     fontwdata[ 7: 0] <= wstrb[0] ? wdata[ 7: 0] : fontrdata[ 7:0];
-		     fontwdata[15: 8] <= wstrb[1] ? wdata[15: 8] : fontrdata[15:8];
+		     fontwstrb <= wstrb;
+		     fontwdata <= wdata;
 		     vga_ready <= 1;
 		  end
 	       end else begin // 1st "bank" VRAM
 		  // MUX read access
-		  if (needsread && xpos[2:0] == 0) begin
+		  if (isread && xpos[2:0] == 0) begin
 		     vramren <= 1;
 		     vramraddr <= addr[16:2];
-		  end else if (needsread && vramren && xpos[2:0] == 2) begin
+		  end else if (isread && vramren && xpos[2:0] == 2) begin
 		     // the riscv core runs half the clock
 		     // w/o read buffer we get some glitches
 		     vramren <= 0;
-		     vga_rdata[15:0] <= vramrdata[15:0];
+		     vga_rdata[31:0] <= vramrdata[31:0];
 		     readready <= 1;
 		     vga_ready <= !iswrite; // micro optimization
-		  end else if (!needsread || (needsread && readready)) begin
+		  end else if (!isread || (isread && readready)) begin
 		     vramwen <= iswrite;
 		     vramwaddr <= addr[16:2];
-		     vramwdata[ 7: 0] <= wstrb[0] ? wdata[ 7: 0] : vramrdata[ 7:0];
-		     vramwdata[15: 8] <= wstrb[1] ? wdata[15: 8] : vramrdata[15:8];
+		     vramwstrb <= wstrb;
+		     vramwdata <= wdata;
 		     vga_ready <= 1;
 		  end
 	       end
