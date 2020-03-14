@@ -426,44 +426,42 @@ module vga(
 	    // must be aligned 16 bit writes, ..!
 	    if (!addr[23]) begin // VRAM, not CTRL registers
 	       if (addr[17]) begin
-		  //  // 2nd "bank" FONT
+		  // 2nd "bank" FONT
 		  // MUX read access
-		  if (isread && xpos[2:0] == 0) begin
-		     fontren <= 1;
-		     fontraddr <= addr[12:2];
-		  end else if (isread && fontren && xpos[2:0] == 2) begin
-		     // the riscv core runs half the clock
-		     // w/o read buffer we get some glitches
-		     fontren <= 0;
-		     vga_rdata[31:0] <= fontrdata[31:0];
-		     readready <= 1;
-		     vga_ready <= !iswrite; // micro optimization
-		  end else if (!isread || (isread && readready)) begin
+		  if (iswrite) begin // we can always write
 		     fontwen <= iswrite;
 		     fontwaddr <= addr[13:2];
 		     fontwstrb <= wstrb;
 		     fontwdata <= wdata;
 		     vga_ready <= 1;
-		  end
-	       end else begin // 1st "bank" VRAM
-		  // MUX read access
-		  if (isread && xpos[2:0] == 0) begin
-		     vramren <= 1;
-		     vramraddr <= addr[16:2];
-		  end else if (isread && vramren && xpos[2:0] == 2) begin
-		     // the riscv core runs half the clock
-		     // w/o read buffer we get some glitches
-		     vramren <= 0;
-		     vga_rdata[31:0] <= vramrdata[31:0];
+		  end else if (isread && xpos[2:0] == 0) begin
+		     fontren <= 1;
+		     fontraddr <= addr[12:2];
+		  end else if (isread && fontren && xpos[2:0] == 2) begin
+		     fontren <= 0;
+		     vga_rdata[31:0] <= fontrdata[31:0];
 		     readready <= 1;
 		     vga_ready <= !iswrite; // micro optimization
-		  end else if (!isread || (isread && readready)) begin
+		  end else if (isread && readready)
+		    vga_ready <= 1;
+	       end else begin // 1st "bank" VRAM
+		  // MUX read access
+		  if (iswrite) begin // we can always write
 		     vramwen <= iswrite;
 		     vramwaddr <= addr[16:2];
 		     vramwstrb <= wstrb;
 		     vramwdata <= wdata;
 		     vga_ready <= 1;
-		  end
+		  end else if (isread && xpos[1:0] == 0) begin
+		     vramren <= 1;
+		     vramraddr <= addr[16:2];
+		  end else if (isread && vramren && xpos[1:0] == 2) begin
+		     vramren <= 0;
+		     vga_rdata[31:0] <= vramrdata[31:0];
+		     readready <= 1;
+		     vga_ready <= !iswrite; // micro optimization
+		  end else if (isread && readready)
+		    vga_ready <= 1;
 	       end
 	    end else begin // high bit set: CTRL regs
 	       vga_ready <= 1;
