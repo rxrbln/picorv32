@@ -289,7 +289,8 @@ module vga(
    wire iswrite = wstrb[3:0] != 4'h0;
    reg 	readready = 0;
    
-   wire [15:0] textAddr = ((ypos & 16'hFFF0) << 3) | ((xpos[15:0] + 7) >> 3);
+   wire [15:0] textAddr = ((ypos & 16'h0FF0) << 3) |
+	       (xpos < 0 ? 0 : ((xpos + 7) >> 3));
    wire textHiWord = textAddr & 1;
    
    // ----------------------------------------------------------------------------
