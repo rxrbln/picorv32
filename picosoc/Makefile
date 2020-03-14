@@ -1,6 +1,6 @@
 
 CROSS=riscv32-unknown-elf-
-CFLAGS=
+CFLAGS=-fno-exceptions -fno-rtti -Os -mabi=ilp32
 
 ADDV=video_timing.v vga.v audio.v
 HDMI2=tmds_encoder.v fake_differential.v  vga2dvid.v clk_25_250_125_25.v
@@ -105,8 +105,8 @@ ulx3sim: ulx3s_tb.vvp ulx3s_fw.hex
 ulx3synsim: ulx3s_syn_tb.vvp ulx3s_fw.hex
 	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3s.json: ulx3s.v sdram.v spimemio.v spiflash2.v simpleuart.v $(ADDV) ../picorv32.v # picosoc.v
-	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json' ulx3s.v sdram.v spimemio.v spiflash2.v simpleuart.v \
+ulx3s.json: ulx3s.v sdram.v spimemio.v spimmc.v simpleuart.v $(ADDV) ../picorv32.v # picosoc.v
+	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json -abc2' ulx3s.v sdram.v spimemio.v spimmc.v simpleuart.v \
 	$(HDMI2) $(ADDV) ../picorv32.v # $^
 
 ulx3s_tb.vvp: ulx3s_tb.v ulx3s.v ulx3s_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
@@ -119,14 +119,14 @@ ulx3s_syn.v: ulx3s.json ulx3s_fw.hex
 	yosys -p 'read_json ulx3s.json; write_verilog ulx3s_syn.v'
 
 ulx3s.cfg: ulx3s.lpf ulx3s.json
-	nextpnr-ecp5 --freq 25 --placer heap --85k --textcfg ulx3s.cfg --lpf ulx3s.lpf --json ulx3s.json
+	nextpnr-ecp5 --freq 45 --placer heap --85k --textcfg ulx3s.cfg --lpf ulx3s.lpf --json ulx3s.json
 
 ulx3s.bit: ulx3s.cfg
 	#ecptime -d up5k -c 13 -mtr ulx3s.rpt ulx3s.cfg
 	ecppack ulx3s.cfg --bit ulx3s.bit
 
 ulx3sprog: ulx3s.bit ulx3s_fw.img
-	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x200000 ulx3s_fw.img
+	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x400000 ulx3s_fw.img
 	/usr/src/f32c-ujprog/ujprog/ujprog -t ulx3s.bit # -j FLASH 
 
 ulx3sprog_fw: ulx3s_fw.bin
@@ -136,7 +136,7 @@ ulx3s_sections.lds: sections.lds
 	$(CROSS)cpp -P -DULX3S -o $@ $^
 
 ulx3s_fw.elf: ulx3s_sections.lds start.S firmware.c
-	$(CROSS)gcc $(CFLAGS) -DULX3S -march=rv32imc -Wl,-Bstatic,-T,ulx3s_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_fw.elf start.S firmware.c
+	$(CROSS)g++ $(CFLAGS) -I utility -DULX3S -march=rv32im -Wl,-Bstatic,-T,ulx3s_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_fw.elf start.S firmware.c
 
 ulx3s_fw.hex: ulx3s_fw.elf
 	$(CROSS)objcopy -O verilog ulx3s_fw.elf /dev/stdout | fold -w 12 | sed '/@/d; s/\(..\) \(..\) \(..\) \(..\)/\4\3\2\1/' > ulx3s_fw.hex
