@@ -432,7 +432,7 @@ int vsprintf(char* out, const char* format, va_list argp)
 	out += sprintf(out, "%d.%d", _, __ % 10);
 #endif
       } else {
-        out += sprintf(out, "NIY: %%%c", fmt);
+        out += sprintf(out, "NYI: %%%c", fmt);
       }
     } else {
       *out++ = *format;
@@ -1099,14 +1099,6 @@ void midi_note(uint8_t ch, uint8_t note, uint8_t vol = 0)
   reg_uart_midi = vol;
 }
 
-void sleep(int wait) {
-  uint32_t cycles_begin, cycles_now;
-  __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
-  do {
-    __asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
-  } while (cycles_now - cycles_begin < wait);
-}
-
 void cmd_midi()
 {
   print("midi test");
@@ -1126,69 +1118,137 @@ void cmd_midi()
   midi_note(9, 0x23);
   
   print(", key to continue.\n");
-  
-  char c = getchar();
+  getchar();
   
   // off
   midi_note(midi_ch, 0x40);
   midi_note(midi_ch, 0x43);
   
   // MIDI file
-  int offset = 0x48;
-  int bps = 120;
+  int offset = 0x16;
+  int division = 0x01e0; // ticks per quater
+  int tempo = 120;
+  
+  uint32_t cycles_begin;
+  __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
+
+  int len= 1; // determine len from event
   while (offset < sizeof(midifile)) {
+    //printf("%x>", offset);
     uint32_t delta = readVar(offset);
-    
-    printf("t: %d", delta);
-    
+  
+  restart:
     if (delta > 0) {
-      //printf("wait: %d\n", wait);
-      delay(SYSCLK / bps / 4 * delta); // quater note delta
+      uint32_t wait = 60 * SYSCLK / tempo / division * delta;
+      printf("t(%02x)", delta);
+    
+      uint32_t cycles_now;
+      do {
+	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+      } while (cycles_now - cycles_begin < wait);
+      cycles_begin = cycles_now; // next reference
     }
     
-    int16_t e;
-    do {
-      e = midifile[offset++];
-      if (e < 0x80) {
-	printf(" NOT MIDI? t?: %d", e);
-	delay(SYSCLK / bps / 4 * e); // quater note delta
-      }
-    } while (!(e & 0x80));
-    
-    int len = 1;
-    
-    if (e == 0xff) {
-      printf("break on first meta event\n");
-      break;
+    int16_t e = midifile[offset++];
+    if (e < 0x80) {
+      --offset; // re-read below
+      goto running_status;
     }
     
+    len = 1;
     switch (e & 0xf0) {
     case 0x80: // note off
     case 0x90: // note on
+    case 0xa0: // polyphonic key presssure / Aftertouch
     case 0xb0: // control change
+    case 0xe0: // pitch bend
       len = 2; break;
       
-    case 0xa0: // polyphonic key presssure / Aftertouch
-    case 0xc0:
+    case 0xc0: // program change, instrument / sound
+    case 0xd0: // channel key pressure
       len = 1; break;
+
+    case 0xf0:
+      switch(e) {
+      case 0xf7: // sysex
+	len = readVar(offset);
+	printf(" sysex: %d\n", len);
+	offset += len;
+	goto next;
+	break;
+      case 0xff: // meta events
+	{
+	  uint8_t typ = midifile[offset++];
+	  len = readVar(offset);
+	  const char* str = "UNKN";
+	  bool _str = 1;
+	  switch (typ) {
+	  case 0: str = "SEQ#"; break;
+	  case 1: str = "TEXT"; break;
+	  case 2: str = "COPYR"; break;
+	  case 3: str = "NAME"; break;
+	  case 4: str = "INSTR"; break;
+	  case 5: str = "LYRIC"; break;
+	  case 6: str = "MARKER"; break;
+	  case 7: str = "CUE"; break;
+	  case 0x20: str = "MIDI PRFX"; break;
+	  case 0x2f: str = "EOT"; break;
+	  case 0x51: str = "TEMPO";
+	     // us per quarter note
+	    _str = 0;
+	    tempo = 60 * 1000000 /
+	      ((midifile[offset + 0] << 16) |
+	       (midifile[offset + 1] << 8) |
+	       midifile[offset + 2]);
+	    printf("New tempo: %d\n", tempo);
+	    break;
+	  case 0x54: str = "SMTPE"; break;
+	  case 0x58: str = "TIME"; _str = 0; break;
+	  case 0x59: str = "KEYSIG"; _str = 0; break;
+	  case 0x7f: str = "SEQSPEC"; _str = 0; break;
+	  }
+	  
+	  printf(" meta: %02x %s, #%d", typ, str, len);
+	  if (_str)
+	    printf(": %.*s\n", len, &midifile[0] + offset);
+	  else {
+	    for (int i = 0; i < len; ++i)
+	      printf(" %02x", midifile[offset + i]);
+	    printf("\n");
+	  }
+	  
+	  offset += len;
+	  goto next;
+	}
+      default:
+	printf(" NYI: EXT: %02x!\n", e);
+	
+      }
+      break;
       
     default:
       printf(" NYI: MIDI: %02x!\n", e);
       break;
     };
     
-    printf(" %02x", e);
-    
+    printf("\t%02x", e);
+    // shift channels, for mt32 2-8+10 mapping :-/
+    //if ((e < 0xf0) && (e & 0xf) != 9) e += 1;
     reg_uart_midi = e;
+    
+  running_status:
     for (int i = 0; i < len; ++i, ++offset) {
       // TODO: sanity check MSB not set!
-      printf(" %02x", midifile[offset]);
+      //printf(" %02x", midifile[offset]);
       reg_uart_midi = midifile[offset];
     }
-    printf("\n");
+    
+    printf("."); // was "\n"
+    
+  next:
+    ;
   }
   
- done:
   return;
 }
 
