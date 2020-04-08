@@ -54,7 +54,10 @@ extern uint32_t sram;
 #define reg_spictrl (*(volatile uint32_t*)0x02000000)
 #define reg_uart_clkdiv (*(volatile uint32_t*)0x02000004)
 #define reg_uart_data (*(volatile uint32_t*)0x02000008)
+
 #define reg_leds (*(volatile uint32_t*)0x03000000)
+#define reg_uart_midi (*(volatile uint8_t*)0x03000010)
+
 #define reg_dac ((volatile uint32_t*)0x40000000)
 #define reg_fm ((volatile uint32_t*)0x40000010)
 #define reg_fm16 ((volatile uint16_t*)0x40000010)
@@ -114,7 +117,9 @@ void set_flash_latency(uint8_t value)
 	reg_spictrl = (reg_spictrl & ~0x007f0000) | ((value & 15) << 16);
 
 	uint32_t addr = 0x800004;
-	uint8_t buffer_wr[5] = {0x71, addr >> 16, addr >> 8, addr, 0x70 | value};
+	uint8_t buffer_wr[5] = {0x71,
+				(uint8_t)(addr >> 16), (uint8_t)(addr >> 8),
+				(uint8_t)(addr), 0x70 | value};
 	flashio(buffer_wr, 5, 0x06);
 }
 
@@ -309,7 +314,7 @@ unsigned __udivsi3(unsigned dividend, unsigned divisor)
   }
   return Q;
 }
-unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3")));
+//unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3")));
 
 
 unsigned __umodsi3(unsigned dividend, unsigned divisor)
@@ -333,7 +338,7 @@ unsigned __umodsi3(unsigned dividend, unsigned divisor)
   }
   return R;
 }
-unsigned __modsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umodsi3")));
+//unsigned __modsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umodsi3")));
 
 unsigned __umulsi3(unsigned a, unsigned b)
 {
@@ -346,7 +351,7 @@ unsigned __umulsi3(unsigned a, unsigned b)
   }
   return res;
 }
-unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
+//unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
 
 #endif
 
@@ -633,7 +638,9 @@ uint8_t cmd_read_flash_regs_print(uint32_t addr, const char *name)
 {
 	set_flash_latency(8);
 
-	uint8_t buffer[6] = {0x65, addr >> 16, addr >> 8, addr, 0, 0};
+	uint8_t buffer[6] = {0x65,
+			     (uint8_t)(addr >> 16), (uint8_t)(addr >> 8),
+			     (uint8_t)(addr), 0, 0};
 	flashio(buffer, 6, 0);
 
 	printf("0x%x &s 0x%x\n", addr, name, buffer[5]);
@@ -1062,6 +1069,129 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
+uint8_t midifile[] = {
+};
+
+uint32_t readVar(int& offset)
+{
+  uint32_t ret = 0;
+  int v;
+  do {
+    v = midifile[offset++];
+    if (v == -1) break;
+
+    ret = (ret << 7) | (v & 0x7f);
+  } while (v & 0x80);
+  
+  return ret;
+}
+
+void midi_sel_instr(uint8_t ch, uint8_t instr)
+{
+  reg_uart_midi = 0xc0 | ch;
+  reg_uart_midi = instr;
+}
+
+void midi_note(uint8_t ch, uint8_t note, uint8_t vol = 0)
+{
+  reg_uart_midi = 0x90 | ch;
+  reg_uart_midi = note;
+  reg_uart_midi = vol;
+}
+
+void sleep(int wait) {
+  uint32_t cycles_begin, cycles_now;
+  __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
+  do {
+    __asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+  } while (cycles_now - cycles_begin < wait);
+}
+
+void cmd_midi()
+{
+  print("midi test");
+  
+  uint8_t midi_ch = 1;
+  uint8_t midi_vol = 0x70;
+  
+  // select instrument
+  midi_sel_instr(midi_ch, 0x41);
+  
+  // test notes on channel 1
+  midi_note(midi_ch, 0x40, midi_vol);
+  midi_note(midi_ch, 0x43, midi_vol);
+  
+  // drum note on channel 10 (9)
+  midi_note(9, 0x23, 0x70); // accustic bass
+  midi_note(9, 0x23);
+  
+  print(", key to continue.\n");
+  
+  char c = getchar();
+  
+  // off
+  midi_note(midi_ch, 0x40);
+  midi_note(midi_ch, 0x43);
+  
+  // MIDI file
+  int offset = 0x48;
+  int bps = 120;
+  while (offset < sizeof(midifile)) {
+    uint32_t delta = readVar(offset);
+    
+    printf("t: %d", delta);
+    
+    if (delta > 0) {
+      //printf("wait: %d\n", wait);
+      delay(SYSCLK / bps / 4 * delta); // quater note delta
+    }
+    
+    int16_t e;
+    do {
+      e = midifile[offset++];
+      if (e < 0x80) {
+	printf(" NOT MIDI? t?: %d", e);
+	delay(SYSCLK / bps / 4 * e); // quater note delta
+      }
+    } while (!(e & 0x80));
+    
+    int len = 1;
+    
+    if (e == 0xff) {
+      printf("break on first meta event\n");
+      break;
+    }
+    
+    switch (e & 0xf0) {
+    case 0x80: // note off
+    case 0x90: // note on
+    case 0xb0: // control change
+      len = 2; break;
+      
+    case 0xa0: // polyphonic key presssure / Aftertouch
+    case 0xc0:
+      len = 1; break;
+      
+    default:
+      printf(" NYI: MIDI: %02x!\n", e);
+      break;
+    };
+    
+    printf(" %02x", e);
+    
+    reg_uart_midi = e;
+    for (int i = 0; i < len; ++i, ++offset) {
+      // TODO: sanity check MSB not set!
+      printf(" %02x", midifile[offset]);
+      reg_uart_midi = midifile[offset];
+    }
+    printf("\n");
+  }
+  
+ done:
+  return;
+}
+
 void cmd_read_ram()
 {
   printf("0> %x %x %x %x %x\n", sdram[0], sdram[1], sdram[2], sdram[3], sdram[4]);
@@ -1231,7 +1361,9 @@ uint8_t sd_read(uint32_t addr, uint8_t* data, int dsize) {
   uint8_t status = 0;
   
   for (; dsize > 0; dsize -= blocksize, ++addr) {
-    uint8_t cmd17[6] = {17, addr >> 24, addr >> 16, addr >> 8, addr};
+    uint8_t cmd17[6] = {17,
+			(uint8_t)(addr >> 24),(uint8_t)(addr >> 16),
+			(uint8_t)(addr >> 8), (uint8_t)(addr)};
     status = sd_cmd(cmd17, sizeof(cmd17), 0, 0, true);
     
     // wait for data token
@@ -1714,6 +1846,7 @@ const uint32_t jit[] = {
 const uint16_t fbimg[] = {
 };
 
+extern "C"
 void main()
 {
         volatile uint32_t* vga_mmio = (volatile uint32_t*)0x80800000;
@@ -1816,6 +1949,9 @@ void main()
 				break;
 			case 'a':
 			        cmd_analyze();
+				break;
+			case 'A':
+			        cmd_midi();
 				break;
 			case 'r':
 			        cmd_read_ram();
