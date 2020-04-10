@@ -24,11 +24,13 @@
 
 typedef long size_t;
 #include "libc/strncmp.c"
+#include "libc/memset.c"
 
 #include "Endianess.hh"
 
 using Exact::EndianessConverter;
 using Exact::LittleEndianTraits;
+using Exact::BigEndianTraits;
 
 #ifdef ICEBREAKER
 #  define MEM_TOTAL 0x20000 /* 128 KB */
@@ -255,6 +257,15 @@ int isdigit(int c) {
   if (c >= '0' && c <= '9')
     return c;
   return 0;
+}
+
+extern "C"
+uint32_t __bswapsi2 (uint32_t x) {
+  return
+    (x << 24) |
+    ((x <<  8) & 0x00ff0000) |
+    ((x >>  8) & 0x0000ff00) |
+    (x >> 24);
 }
 
 #ifndef __riscv_muldiv
@@ -904,6 +915,7 @@ uint8_t getbyte() {
 }
 
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 
 const uint16_t sn_vol_tab[16] = {
@@ -1099,6 +1111,17 @@ void midi_note(uint8_t ch, uint8_t note, uint8_t vol = 0)
   reg_uart_midi = vol;
 }
 
+struct MidiHeader {
+  char typ[4];
+  EndianessConverter<uint32_t, BigEndianTraits> length;
+};
+
+struct MidiHeaderChunk {
+  EndianessConverter<uint16_t, BigEndianTraits> format;
+  EndianessConverter<uint16_t, BigEndianTraits> tracks;
+  EndianessConverter<uint16_t, BigEndianTraits> division;
+};
+
 void cmd_midi()
 {
   print("midi test");
@@ -1123,35 +1146,127 @@ void cmd_midi()
   // off
   midi_note(midi_ch, 0x40);
   midi_note(midi_ch, 0x43);
+
   
   // MIDI file
-  int offset = 0x16;
-  int division = 0x01e0; // ticks per quater
+  int offset = 0;
+  int division = 480; // ticks per quater
   int tempo = 120;
+  
+  int _tracks;
+  struct track {
+    int offset;
+    int tdelta;
+  };
+  track tracks[16];
+  uint8_t runcmds[16] = {};
+  uint8_t runtrack = 0xff;
+
+  // parse main chunk
+  MidiHeader* header = (MidiHeader*)(&midifile[0] + offset);
+  offset += sizeof(MidiHeader);
+  printf("> %.4s %d\n", header->typ, *header->length);
+
+  if (strncmp(header->typ, "MThd", 4) != 0) {
+    printf("not a midi file\n");
+    return;
+  }
+  
+  // parse and setup all tracks
+  {
+    MidiHeaderChunk* headerchunk = (MidiHeaderChunk*)(&midifile[0] + offset);
+    offset += sizeof(MidiHeaderChunk);
+    printf("MThd> %d %d %d\n",
+	   *headerchunk->format, *headerchunk->tracks, *headerchunk->division);
+    
+    header = (MidiHeader*)(&midifile[0] + offset);
+    division = *headerchunk->division;
+    _tracks = *headerchunk->tracks;
+    if (_tracks >= sizeof(tracks) / sizeof(*tracks)) {
+      printf("Too many tracks!\n");
+      _tracks = sizeof(tracks) / sizeof(*tracks);
+    }
+    
+    for (int i = 0; i < _tracks; ++i) {
+      if (strncmp(header->typ, "MTrk", 4) != 0) {
+	printf("expected a track! got: %.4s\n", header->typ);
+	break;
+      }
+      printf("MTrk %x %x\n", offset, *header->length);
+      offset += sizeof(MidiHeader);
+      tracks[i].offset = offset;
+      tracks[i].tdelta = -1;
+      offset += header->length;
+      header = (MidiHeader*)(&midifile[0] + offset);
+    }
+  }
   
   uint32_t cycles_begin;
   __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
-
-  int len= 1; // determine len from event
-  while (offset < sizeof(midifile)) {
-    //printf("%x>", offset);
-    uint32_t delta = readVar(offset);
   
-  restart:
-    if (delta > 0) {
-      uint32_t wait = 60 * SYSCLK / tempo / division * delta;
-      printf("t(%02x)", delta);
+  const bool verbose = false;
+  int len = 1; // determine len from event
+  uint8_t allend = 0, mintrack = 0, maxtrack = _tracks - 1;
+  while (!allend) {
+    int16_t e; // event, fwd.
+    allend = 1;
     
+    // find next active channel event
+    int track, tdelta = 0x7fffffff;
+    if (verbose) printf("\nNext tdeltas:");
+    for (int i = mintrack; i <= maxtrack; ++i) {
+      // valid track from file?
+      if (!tracks[i].offset) continue;
+      
+      if (verbose) printf(" %d", tracks[i].tdelta);
+      
+      allend = 0;
+      // find next event
+      if (tracks[i].tdelta < tdelta) {
+	track = i; // track and file offset to use
+	tdelta = tracks[i].tdelta;
+	offset = tracks[i].offset;
+      }
+    }
+    if (verbose) printf("\n");
+    
+    if (allend) break;
+    
+  restart:
+    
+    printf("\ttr%X @%x t%x>", track, offset, tdelta);
+    
+    // 1st tdelta not initialized?
+    if (tdelta == -1) {
+      goto next;
+    } else if (tdelta > 0) {
+      uint32_t wait = 60 * SYSCLK / tempo / division * tdelta;
+      
+      // update all track next timing deltas
+      for (int i = mintrack; i <= maxtrack; ++i) {
+	// valid track from file?
+	if (tracks[i].offset)
+	  tracks[i].tdelta -= tdelta;
+      }
+      
       uint32_t cycles_now;
       do {
 	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
       } while (cycles_now - cycles_begin < wait);
       cycles_begin = cycles_now; // next reference
+    } else if (tdelta < -1) {
+      printf("Bug: in timing deltas!\n");
+      return;
     }
     
-    int16_t e = midifile[offset++];
+    e = midifile[offset++];
     if (e < 0x80) {
       --offset; // re-read below
+      
+      // if not the same track, re-issue command!
+      if (track != runtrack) {
+	reg_uart_midi = runcmds[track];
+      }
       goto running_status;
     }
     
@@ -1191,8 +1306,14 @@ void cmd_midi()
 	  case 5: str = "LYRIC"; break;
 	  case 6: str = "MARKER"; break;
 	  case 7: str = "CUE"; break;
-	  case 0x20: str = "MIDI PRFX"; break;
-	  case 0x2f: str = "EOT"; break;
+	  case 8: str = "PROGNAME"; break;
+	  case 9: str = "DEVNAME"; break;
+	  case 0x20: str = "MIDIPREFIX"; break;
+	  case 0x21: str = "MIDIPORT"; break;
+	  case 0x2f:
+	    str = "EOT";
+	    offset = 0;
+	    break;
 	  case 0x51: str = "TEMPO";
 	     // us per quarter note
 	    _str = 0;
@@ -1234,19 +1355,35 @@ void cmd_midi()
     printf("\t%02x", e);
     // shift channels, for mt32 2-8+10 mapping :-/
     //if ((e < 0xf0) && (e & 0xf) != 9) e += 1;
-    reg_uart_midi = e;
     
+    // cache for running status commands
+    runcmds[track] = e;
+    reg_uart_midi = e;
+  
   running_status:
+    
     for (int i = 0; i < len; ++i, ++offset) {
       // TODO: sanity check MSB not set!
       //printf(" %02x", midifile[offset]);
       reg_uart_midi = midifile[offset];
     }
     
-    printf("."); // was "\n"
+    //printf("."); // was "\n"
     
   next:
-    ;
+
+    // read next time delta
+    if (offset) { // not EOT
+      tdelta = readVar(offset);
+      
+      // optimize, if next tdelta == 0 directly restart
+      if (tdelta == 0)
+	goto restart;
+    }
+    
+    // update track tdelta & offset
+    tracks[track].tdelta = tdelta;
+    tracks[track].offset = offset;
   }
   
   return;
@@ -1479,7 +1616,6 @@ struct MbrPart {
 __attribute__((packed))
 #endif
 ;
-
 
 struct BiosParameterBlock {
   // DOS 2.0
