@@ -23,6 +23,7 @@
 #include <stdarg.h>
 
 typedef long size_t;
+#include "libc/strlen.c"
 #include "libc/strncmp.c"
 #include "libc/memset.c"
 
@@ -190,6 +191,11 @@ void enable_flash_crm()
 #endif
 
 // --------------------------------------------------------
+
+int open(const char* pathname, int flags = 0);
+size_t read(int fd, void* buf, size_t cound);
+int close(int fd);
+
 
 uint8_t scroll = 0;
 
@@ -525,6 +531,18 @@ char getchar()
 	return getchar_prompt(0);
 }
 
+void getline(char* str, int len)
+{
+  int i;
+  for (i = 0; i < len - 1; ++i) {
+    str[i] = getchar_prompt(0);
+    if (str[i] == '\n' || str[i] == '\r')
+      break;
+    printf("%c", str[i]); // echo
+  }
+  str[i] = 0;
+}
+
 void cmd_print_spi_state()
 {
 	print("SPI State:\n");
@@ -558,7 +576,7 @@ void cmd_memtest(int ext)
 	const int mem_total = ext ? 64*1024*1024 : MEM_TOTAL;
 	print("Running memtest ");
 	
-#if 1
+#if 0
 	*base_word = 0x12345678;
 	base_byte[3] = 0x67;
 	base_byte[1] = 0x23;
@@ -1005,7 +1023,7 @@ void cmd_dac(uint8_t alt)
 	    regs[reg] = c & 0x3f; // always writes the LSB
 	  else
 	    regs[reg] = (regs[reg] & 0x00f) | ((c & 0x3f) << 4);
-	} 
+	}
       }
       
       if (verbose)
@@ -1081,10 +1099,10 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
-uint8_t midifile[] = {
-};
+uint8_t midifile [32*1024];
+int midifilesize = 0;
 
-uint32_t readVar(int& offset)
+uint32_t midi_readVar(int& offset)
 {
   uint32_t ret = 0;
   int v;
@@ -1124,7 +1142,7 @@ struct MidiHeaderChunk {
 
 void cmd_midi()
 {
-  print("midi test");
+  print("midi file to load> ");
   
   uint8_t midi_ch = 1;
   uint8_t midi_vol = 0x70;
@@ -1140,8 +1158,19 @@ void cmd_midi()
   midi_note(9, 0x23, 0x70); // accustic bass
   midi_note(9, 0x23);
   
-  print(", key to continue.\n");
-  getchar();
+  char filename[18];
+  getline(filename, sizeof(filename));
+  
+  int file = open(filename);
+  if (!file) {
+    printf("could not open\n");
+  }
+  
+  printf("MIDI file: %d\n", file);
+  //midifile = (uint8_t*)sdram;
+  midifilesize = read(file, midifile, sizeof(midifile));
+  close(file); file = 0;
+  
   
   // off
   midi_note(midi_ch, 0x40);
@@ -1182,7 +1211,7 @@ void cmd_midi()
     header = (MidiHeader*)(&midifile[0] + offset);
     division = *headerchunk->division;
     _tracks = *headerchunk->tracks;
-    if (_tracks >= sizeof(tracks) / sizeof(*tracks)) {
+    if (_tracks > sizeof(tracks) / sizeof(*tracks)) {
       printf("Too many tracks!\n");
       _tracks = sizeof(tracks) / sizeof(*tracks);
     }
@@ -1206,10 +1235,11 @@ void cmd_midi()
   
   const bool verbose = false;
   int len = 1; // determine len from event
-  uint8_t allend = 0, mintrack = 0, maxtrack = _tracks - 1;
+  uint8_t mintrack = 0, maxtrack = _tracks - 1;
+  bool allend = false;
   while (!allend) {
     int16_t e; // event, fwd.
-    allend = 1;
+    allend = true;
     
     // find next active channel event
     int track, tdelta = 0x7fffffff;
@@ -1220,7 +1250,7 @@ void cmd_midi()
       
       if (verbose) printf(" %d", tracks[i].tdelta);
       
-      allend = 0;
+      allend = false;
       // find next event
       if (tracks[i].tdelta < tdelta) {
 	track = i; // track and file offset to use
@@ -1285,16 +1315,28 @@ void cmd_midi()
 
     case 0xf0:
       switch(e) {
-      case 0xf7: // sysex
-	len = readVar(offset);
+      case 0xf0: // sysex
+	len = midi_readVar(offset);
 	printf(" sysex: %d\n", len);
+#if 1
+	// run it, what could possibly go wrong!
+#else
+	for (int i = 0; i < len; ++i)
+	  printf(" %02x", midifile[offset + i]);
+	printf("\n");
 	offset += len;
 	goto next;
+#endif
 	break;
+      case 0xf7: // sysex
+	printf(" sysex: END? (should be in SYSEX len!)\n");
+	goto next;
+	break;
+
       case 0xff: // meta events
 	{
 	  uint8_t typ = midifile[offset++];
-	  len = readVar(offset);
+	  len = midi_readVar(offset);
 	  const char* str = "UNKN";
 	  bool _str = 1;
 	  switch (typ) {
@@ -1343,7 +1385,6 @@ void cmd_midi()
 	}
       default:
 	printf(" NYI: EXT: %02x!\n", e);
-	
       }
       break;
       
@@ -1357,10 +1398,11 @@ void cmd_midi()
     //if ((e < 0xf0) && (e & 0xf) != 9) e += 1;
     
     // cache for running status commands
-    runcmds[track] = e;
     reg_uart_midi = e;
+    runcmds[track] = e;
   
   running_status:
+    runtrack = track;
     
     for (int i = 0; i < len; ++i, ++offset) {
       // TODO: sanity check MSB not set!
@@ -1374,7 +1416,7 @@ void cmd_midi()
 
     // read next time delta
     if (offset) { // not EOT
-      tdelta = readVar(offset);
+      tdelta = midi_readVar(offset);
       
       // optimize, if next tdelta == 0 directly restart
       if (tdelta == 0)
@@ -1768,9 +1810,22 @@ uint32_t fat_next_cluster(FAT* fat, uint32_t cluster) {
 FAT fat;
 uint32_t fddb; // File Descriptor DB
 
-int open(const char* pathname, int flags = 0)
+char* rmstrtrail(char* str, char ch)
 {
-  //printf("open\n");
+  int i;
+  for (i = strlen(str); i > 0;) {
+    if (str[i-1] != ch) break;
+    --i;
+    str[i] = 0;
+  }
+  return str + i;
+}
+
+int open(const char* pathname, int flags)
+{
+  char filename[8+4+1];
+  printf("open\n");
+  
   // decode root directory, TODO: descent into chils directories
   for (uint32_t cluster = fat.rootCluster; cluster;) {
     int status = fat_read_cluster(&fat, cluster, block, sizeof(block));
@@ -1790,13 +1845,18 @@ int open(const char* pathname, int flags = 0)
 	case 0xe5: printf("DELETED ");
 	case 0x2e: printf("DOT Entry ");
 	default:
-	  printf("%.8s.%.3s",  dentry[i].filename, dentry[i].ext); break;
+	  //printf("%.8s.%.3s",  dentry[i].filename, dentry[i].ext);
+	  sprintf(filename, "%.8s", dentry[i].filename);
+	  sprintf(rmstrtrail(filename, ' '), ".%.3s", dentry[i].ext);
+	  rmstrtrail(filename, ' ');
+	  printf("'%s'", filename);
+	  break;
 	}
 	
 	if (dentry[i].attributes & 0x10)
 	  printf(" <DIR>");
 	
-	if (strncmp(dentry[i].filename, pathname, 11) == 0) {
+	if (strncmp(filename, pathname, 8+4) == 0) {
 	  printf(" !! MATCH !!\n");
 	  // TODO: register and return fd dictionary
 	  fddb = (dentry[i].highCluster << 16) | dentry[i].startCluster;
@@ -1812,11 +1872,11 @@ int open(const char* pathname, int flags = 0)
   return 0;
 }
 
-size_t read(int fd, void* buf, size_t count)
+size_t _read(int fd, void* buf, size_t count)
 {
   //printf("read\n");
 
-  // eoyf?
+  // eof?
   if (!fddb)
     return -1;
   
@@ -1828,6 +1888,21 @@ size_t read(int fd, void* buf, size_t count)
   fddb = fat_next_cluster(&fat, fddb);
   
   return count;
+}
+
+size_t read(int fd, void* _buf, size_t count)
+{
+  char* buf = (char*)_buf;
+  size_t ret = 0, total = 0;
+  while (ret >= 0 && total < count) {
+    printf(".");
+    ret = _read(fd, buf + total, sizeof(block));
+    if (ret >= 0) {
+      total += sizeof(block);
+    }
+  }
+  printf("EOF: %s\n", total);
+  return total;
 }
 
 int close(int fd)
@@ -1941,7 +2016,7 @@ void cmd_read_sd() {
     fat.rootCluster = bootsect->bpb.rootCluster;
   }
 
-  file = open("MONKEY  TGA");
+  file = open("MONKEY.TGA");
   if (file) {
     printf("TGA file: %d\n", file);
     
@@ -1965,7 +2040,7 @@ void cmd_read_sd() {
     while (ret >= 0) {
       printf(".");
       
-      ret = read(file, block, sizeof(block));
+      ret = _read(file, block, sizeof(block));
       if (ret >= 0) {
 	int j = 0;
 	if (header == 0) {
@@ -1991,7 +2066,6 @@ void cmd_read_sd() {
 	}
 	++header;
       }
-      
     }
     
     printf("EOF\n");
@@ -2000,7 +2074,7 @@ void cmd_read_sd() {
 
   goto end;
 
-  file = open("SONG61  WAV");
+  file = open("SONG61.WAV");
   if (file) {
     printf("WAV file: %d\n", file);
     
@@ -2010,7 +2084,7 @@ void cmd_read_sd() {
     while (ret >= 0) {
       printf(".");
       
-      ret = read(file, highmem, sizeof(block));
+      ret = _read(file, highmem, sizeof(block));
       if (ret >= 0) {
 	highmem += sizeof(block);
 	highmemsize += sizeof(block);
