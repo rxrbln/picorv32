@@ -120,25 +120,27 @@ assign sd_cas = sd_cmd[1];
 assign sd_we  = sd_cmd[0];
 
 wire oe = oeA;
-
 reg acycle;
 
-// little: 0x
-// big:    0x876543210
- 
 always @(posedge clk) begin
-   case (q)
-     STATE_CMD_START:
-       acycle <= oe | we;
-     STATE_CMD_READ:
-       dout[15:0] <= sd_data_in[15:0];
-     STATE_CMD_READ2: begin
-	dout[31:16] <= sd_data_in[15:0];
-	ready <= acycle;
-     end
-     STATE_CMD_READ2 + 2:
-       ready <= 0;
-     endcase
+   if (q == STATE_CMD_START)
+     acycle <= oeA | we;
+
+   // optimization, ready writes faster
+   if (acycle && we) begin
+      if (q == STATE_CMD_CONT + 1)
+	ready <= 1;
+      else if (q == STATE_CMD_CONT + 3)
+	ready <= 0;
+   end else if (acycle && oeA) begin
+      if (q == STATE_CMD_READ)
+	dout[15:0] <= sd_data_in[15:0];
+      else if (q == STATE_CMD_READ2) begin
+	 dout[31:16] <= sd_data_in[15:0];
+	 ready <= 1;
+      end else if (q == STATE_CMD_READ2 + 2)
+	ready <= 0;
+   end
 end
 
 wire [3:0] reset_cmd =
@@ -165,8 +167,7 @@ assign sd_ba = addr[23:22];
 
 // drive ram data lines when writing, set them as inputs otherwise
 // the eight bits are sent on both bytes ports. Which one's actually
-// written depends on the state of dqm of which only one is active
-// at a time when writing
+// written depends on the state of dqm
 assign sd_data_out = q >= STATE_CMD_CONT + 1 ? din[31:16] : din[15:0];
 assign sd_dqm = we ? (q >= STATE_CMD_CONT + 1 ? dqm[3:2] : dqm[1:0]) : 2'b0;
 
