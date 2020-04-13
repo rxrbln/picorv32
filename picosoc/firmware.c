@@ -2142,8 +2142,7 @@ pair gosper_glider_gun[] = {
 };
 
 void life_set(uint8_t* state, int x, int y, bool v = true) {
-  if (x < 0 || y < 0 ||
-      x > life_w-1 || y > life_h-1)
+  if (x < 0 || y < 0 || x >= life_w || y >= life_h)
     return;
   state[y * life_w + x] = v;
 }
@@ -2240,10 +2239,7 @@ void life_evolve(uint8_t* state, uint8_t* state2) {
 	life_at(state, x+1, y+1);
       
       // dead or alive?
-      if (state[y * life_w + x])
-	*state2++ = (count == 2) || (count == 3);
-      else
-	*state2++ = count == 3;
+      *state2++ = (count == 3) || (count == 2 && state[y * life_w + x]);
     }
   }
 }
