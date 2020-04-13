@@ -571,20 +571,28 @@ void cmd_memtest(int ext)
 	uint32_t state;
 	uint32_t errors;
 
-	volatile uint32_t *base_word = (uint32_t *) (ext ? sdram : 0);
-	volatile uint8_t *base_byte = (uint8_t *) (ext ? sdram : 0);
+	volatile uint32_t* base_word = (volatile uint32_t *) (ext ? sdram : 0);
+	volatile uint8_t* base_byte = (volatile uint8_t *) (ext ? sdram : 0);
 	const int mem_total = ext ? 64*1024*1024 : MEM_TOTAL;
-	print("Running memtest ");
+	print("Running memtest\n");
 	
 #if 0
-	*base_word = 0x12345678;
-	base_byte[3] = 0x67;
-	base_byte[1] = 0x23;
-	base_byte[2] = 0x45;
-	base_byte[0] = 0x01;
-	printf("%02x %02x %02x %02x\n",
-	       base_byte[0], base_byte[1], base_byte[2], base_byte[3]);
-	return;
+	if (ext) {
+	  base_word[0] = 0x00112233;
+	  //base_word[1] = 0x44556677;
+	  //base_word[2] = 0x8899aabb;
+	  //base_byte[3] = 0x67;
+	  //base_byte[1] = 0x23;
+	  //base_byte[2] = 0x45;
+	  //base_byte[0] = 0x01;
+	  printf("%08x %02x %02x %02x %02x\n", base_word[0],
+		 base_byte[3], base_byte[2], base_byte[1], base_byte[0]);
+	  printf("%08x %02x %02x %02x %02x\n", base_word[1],
+		 base_byte[7], base_byte[6], base_byte[5], base_byte[4]);
+	  printf("%08x %02x %02x %02x %02x\n", base_word[2],
+		 base_byte[11], base_byte[10], base_byte[9], base_byte[8]);
+	  return;
+	}
 #endif
 	
 	// Walk in all w/ 3 increments, word access
@@ -1099,7 +1107,7 @@ void cmd_dac(uint8_t alt)
     reg_fm[i] = 0;
 }
 
-uint8_t midifile [32*1024];
+uint8_t* midifile;
 int midifilesize = 0;
 
 uint32_t midi_readVar(int& offset)
@@ -1161,22 +1169,22 @@ void cmd_midi()
   char filename[18];
   getline(filename, sizeof(filename));
   
+  // note off
+  midi_note(midi_ch, 0x40);
+  midi_note(midi_ch, 0x43);
+  
+  
   int file = open(filename);
   if (!file) {
     printf("could not open\n");
+    return;
   }
   
   printf("MIDI file: %d\n", file);
-  //midifile = (uint8_t*)sdram;
-  midifilesize = read(file, midifile, sizeof(midifile));
+  midifile = (uint8_t*)sdram;
+  midifilesize = read(file, midifile, 1024*1024);
   close(file); file = 0;
-  
-  
-  // off
-  midi_note(midi_ch, 0x40);
-  midi_note(midi_ch, 0x43);
-
-  
+    
   // MIDI file
   int offset = 0;
   int division = 480; // ticks per quater
