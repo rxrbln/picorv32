@@ -68,7 +68,7 @@ extern uint32_t sram;
 static uint16_t* vga_vram = (uint16_t*)0x80000000;
 static uint16_t* vga_font = (uint16_t*)0x80002000;
 
-static volatile uint32_t* sdram = (uint32_t*)0x20000000;
+static uint32_t* sdram = (uint32_t*)0x20000000;
 
 // --------------------------------------------------------
 
@@ -2112,6 +2112,160 @@ const uint8_t charset[] = {
   // custom charset, if you want any
 };
 
+// Conway's Game of Life
+
+const uint8_t life_w = 40, life_h = 30;
+
+struct pair {
+  uint8_t x, y;
+};
+
+pair gosper_glider_gun[] = {
+  {1,5}, {2,5}, {1,6}, {2,6},
+  {35,3}, {36,3}, {35,4}, {36,4},
+  
+  {13,3}, {14,3},
+  {12,4}, {16,4},
+  {11,5}, {17,5},
+  {11,6}, {15,6}, {17,6}, {18,6},
+  {11,7}, {17,7},
+  {12,8}, {16,8},
+  {13,9}, {14,9},
+
+  {25,1},
+  {23,2}, {25,2},
+  {21,3}, {22,3},
+  {21,4}, {22,4},
+  {21,5}, {22,5},
+  {23,6}, {25,6},
+  {25,7},
+};
+
+void life_set(uint8_t* state, int x, int y, bool v = true) {
+  if (x < 0 || y < 0 ||
+      x > life_w-1 || y > life_h-1)
+    return;
+  state[y * life_w + x] = v;
+}
+
+void life_set_array(uint8_t* state, pair* array, int n) {
+  for (int i = 0; i < n; ++i) {
+    life_set(state, array[i].x, array[i].y);
+  }
+}
+
+uint8_t life_at(uint8_t* state, int x, int y) {
+  if (x < 0 || y < 0 || x >= life_w || y >= life_h)
+    return 0;
+  return state[y * life_w + x] ? 1 : 0;
+}
+
+void life_draw(uint8_t* state) {
+  uint8_t c = 1;
+  for (int y = 0; y < life_h; ++y) {
+    for (int x = 0; x < life_w*2; x += 2, ++state) {
+      // double text char as square pixels
+      vga_vram[y*128 + x] = vga_vram[y*128 + x + 1] =
+	*state > 0 ? (c++ << 12) : 0;
+      if (c > 7) c = 1;
+    }
+  }
+}
+
+void life_block(uint8_t* state, int x, int y)
+{
+  life_set(state, x, y);
+  life_set(state, x+1, y);
+  life_set(state, x, y+1);
+  life_set(state, x+1, y+1);
+}
+
+void life_blinker(uint8_t* state, int x, int y)
+{
+  life_set(state, x, y);
+  life_set(state, x, y+1);
+  life_set(state, x, y+2);
+}
+
+void life_glider(uint8_t* state, int x, int y)
+{
+  life_set(state, x+1, y);
+  life_set(state, x+2, y+1);
+  life_set(state, x, y+2);
+  life_set(state, x+1, y+2);
+  life_set(state, x+2, y+2);
+}
+
+void life_seed(uint8_t* state) {
+  memset(state, 0, life_w * life_h);
+  
+  //life_block(state, 1, 1);
+  //life_glider(state, 4, 4);
+  //life_blinker(state, life_w/2, life_h/2);
+  
+#if 0
+  life_set(state, life_w/2 - 1, life_h/2 - 1);
+  life_set(state, life_w/2 - 1, life_h/2 + 1);
+  life_set(state, life_w/2 - 2, life_h/2 - 1);
+  life_set(state, life_w/2 - 2, life_h/2 + 1);
+  life_set(state, life_w/2 - 3, life_h/2 - 1);
+  life_set(state, life_w/2 - 3, life_h/2 + 0);
+  life_set(state, life_w/2 - 3, life_h/2 + 1);
+
+  life_set(state, life_w/2 + 1, life_h/2 - 1);
+  life_set(state, life_w/2 + 1, life_h/2 + 1);
+  life_set(state, life_w/2 + 2, life_h/2 - 1);
+  life_set(state, life_w/2 + 2, life_h/2 + 1);
+  life_set(state, life_w/2 + 3, life_h/2 - 1);
+  life_set(state, life_w/2 + 3, life_h/2 + 0);
+  life_set(state, life_w/2 + 3, life_h/2 + 1);
+#else
+  life_set_array(state, gosper_glider_gun,
+		 sizeof(gosper_glider_gun) / sizeof(*gosper_glider_gun));
+#endif
+}
+
+void life_evolve(uint8_t* state, uint8_t* state2) {
+  for (int y = 0; y < life_h; ++y) {
+    for (int x = 0; x < life_w; ++x) {
+      // surrounding popcount
+      uint8_t count =
+	life_at(state, x-1, y-1) +
+	life_at(state, x,   y-1) +
+	life_at(state, x+1, y-1) +
+	life_at(state, x-1, y) +
+	life_at(state, x+1, y) +
+	life_at(state, x-1, y+1) +
+	life_at(state, x,   y+1) +
+	life_at(state, x+1, y+1);
+      
+      // dead or alive?
+      if (state[y * life_w + x])
+	*state2++ = (count == 2) || (count == 3);
+      else
+	*state2++ = count == 3;
+    }
+  }
+}
+
+void life() {
+  uint8_t* state = (uint8_t*)sdram;
+  uint8_t* state2 = state + life_w * life_h;
+  
+  life_seed(state);
+  life_draw(state);
+  //getchar();
+  
+  for (int i = 0; i < 666667; ++i) {
+    life_evolve(state, state2);
+    life_draw(state2);
+    life_evolve(state2, state);
+    life_draw(state);
+    if (reg_uart_data != -1)
+      break;
+  }
+}
+
 const char banner[80] = "RX32 SoC, initializing. https://rene.rene.de ;-)";
 
 const uint32_t jit[] = {
@@ -2244,6 +2398,9 @@ void main()
 			case ' ':
 			        scroll ^= 2; // or 1
 				break;
+			case 'l':
+			        life();
+			        break;
 			case 'g':
 			case 'G':
 			        {
