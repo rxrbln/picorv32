@@ -23,9 +23,13 @@
 #include <stdarg.h>
 
 typedef long size_t;
+extern "C" {
 #include "libc/strlen.c"
 #include "libc/strncmp.c"
+#include "libc/strncasecmp.c"
 #include "libc/memset.c"
+#include "libc/toupper.c"
+}
 
 #include "Endianess.hh"
 
@@ -1195,8 +1199,8 @@ void cmd_midi()
     int offset;
     int tdelta;
   };
-  track tracks[16];
-  uint8_t runcmds[16] = {};
+  track tracks[32];
+  uint8_t runcmds[sizeof(tracks) / sizeof(*tracks)] = {};
   uint8_t runtrack = 0xff;
 
   // parse main chunk
@@ -1286,7 +1290,11 @@ void cmd_midi()
 	if (tracks[i].offset)
 	  tracks[i].tdelta -= tdelta;
       }
-      
+
+      // key to exit
+      if (reg_uart_data != -1)
+	break;
+
       uint32_t cycles_now;
       do {
 	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
@@ -1365,7 +1373,7 @@ void cmd_midi()
 	    offset = 0;
 	    break;
 	  case 0x51: str = "TEMPO";
-	     // us per quarter note
+	     // µs per quarter note
 	    _str = 0;
 	    tempo = 60 * 1000000 /
 	      ((midifile[offset + 0] << 16) |
@@ -1864,7 +1872,7 @@ int open(const char* pathname, int flags)
 	if (dentry[i].attributes & 0x10)
 	  printf(" <DIR>");
 	
-	if (strncmp(filename, pathname, 8+4) == 0) {
+	if (strncasecmp(filename, pathname, 8+4) == 0) {
 	  printf(" !! MATCH !!\n");
 	  // TODO: register and return fd dictionary
 	  fddb = (dentry[i].highCluster << 16) | dentry[i].startCluster;
