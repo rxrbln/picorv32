@@ -19,7 +19,6 @@
 
 /*
  * Currently mostly memory limited and proof of concept.
- * (Oh, and also some pixel here and there off-by-one.)
  * 640x480, 8x16 text + color attribute & palette.
  */
 
@@ -423,7 +422,6 @@ module vga(
 	 if (!sel) begin
 	    readready <= 0;
 	 end else begin
-	    // must be aligned 16 bit writes, ..!
 	    if (!addr[23]) begin // VRAM, not CTRL registers
 	       if (addr[17]) begin
 		  // 2nd "bank" FONT
@@ -441,7 +439,7 @@ module vga(
 		     fontren <= 0;
 		     vga_rdata[31:0] <= fontrdata[31:0];
 		     readready <= 1;
-		     vga_ready <= !iswrite; // micro optimization
+		     //vga_ready <= !iswrite; // micro optimization
 		  end else if (isread && readready)
 		    vga_ready <= 1;
 	       end else begin // 1st "bank" VRAM
@@ -459,7 +457,7 @@ module vga(
 		     vramren <= 0;
 		     vga_rdata[31:0] <= vramrdata[31:0];
 		     readready <= 1;
-		     vga_ready <= !iswrite; // micro optimization
+		     //vga_ready <= !iswrite; // micro optimization
 		  end else if (isread && readready)
 		    vga_ready <= 1;
 	       end
