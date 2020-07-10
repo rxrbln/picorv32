@@ -31,6 +31,7 @@ module attosoc (
        	input uart_rx,
 	output [3:0] audio_l,
 	output [3:0] audio_r,
+	output [3:0] audio_v,
 	output [3:0] gpdi_dp, gpdi_dn,
 
 	// SPI flash
@@ -68,7 +69,7 @@ module attosoc (
 
 	parameter integer MEM_WORDS = 32768;
 	parameter [31:0] STACKADDR = 32'h 0000_0000 + (4*MEM_WORDS);       // end of memory
-	parameter [31:0] PROGADDR_RESET = 32'h 0040_0000; // 4 MB into flash
+	parameter [31:0] PROGADDR_RESET = 32'h 0030_0000; // 3 MB into flash
 
 	reg [31:0] ram [0:MEM_WORDS-1];
 	//initial $readmemh("ulx3s_fw.hex", ram);
@@ -130,7 +131,7 @@ module attosoc (
    wire [31:0] sdram_rdata;
 
    wire sdram_write = sdram_sel && (mem_wstrb != 4'b0);
-   wire sdram_read = sdram_sel && !sdram_write;
+   wire sdram_read = sdram_sel && (mem_wstrb == 4'b0);
    wire sdram_ready;
    
    sdram sdram(
@@ -246,23 +247,23 @@ module attosoc (
 	wire [31:0] simpleuart_reg_dat_do;
 	wire simpleuart_reg_dat_wait;
 
+   	wire        midiuart_reg_dat_sel = mem_valid && (mem_addr == 32'h 0300_0010);
+	wire midiuart_reg_dat_wait;
+
    
         always @(posedge clk) begin
 	   iomem_ready <= 1'b0;
 	   
 	   if (iomem_valid && mem_addr == 32'h 03000000) begin
 	      if (iomem_wstrb[0]) led <= iomem_wdata[7:0];
-	      iomem_ready <= 1'b1;
 	      iomem_rdata <= led;
+	      iomem_ready <= 1'b1;
 	   end else if (sdram_sel) begin
-	      if (sdram_ready) begin
-		 if (sdram_read)
-		   iomem_rdata <= sdram_rdata;
-		 iomem_ready <= 1;
-	      end
+	      iomem_rdata <= sdram_rdata;
+	      iomem_ready <= sdram_ready;
 	   end else if (vgamem_sel) begin
-	      iomem_ready <= vgamem_ready;
 	      iomem_rdata <= vgamem_rdata;
+	      iomem_ready <= vgamem_ready;
 	   end else if (dac_sel) begin
 	      iomem_ready <= dac_ready;
 	   end
@@ -273,6 +274,7 @@ module attosoc (
 			   spimem_ready || spimemio_cfgreg_sel ||
 			   simpleuart_reg_div_sel ||
 			   (simpleuart_reg_dat_sel && !simpleuart_reg_dat_wait) ||
+			   (midiuart_reg_dat_sel && !midiuart_reg_dat_wait) ||
 			   debug_ready ||
 			   spimmc_ready ||
 			   ram_ready;
@@ -325,7 +327,24 @@ module attosoc (
 		.reg_dat_di  (mem_wdata),
 		.reg_dat_do  (simpleuart_reg_dat_do),
 		.reg_dat_wait(simpleuart_reg_dat_wait),
-			       );
+	);
+
+        wire midi_tx; // fill all bits, for higher voltage
+        assign audio_v = {!midi_tx, !midi_tx, !midi_tx, !midi_tx};
+   	simpleuart #(.DEFAULT_DIV(41666667 / 31250)) midiuart (
+		.clk         (clk         ),
+		.resetn      (resetn      ),
+
+		.ser_tx      (midi_tx     ),
+
+		.reg_div_we  (0), // unused, hopefully allow Yosys optimize the output away, ...
+		.reg_div_di  (0),
+
+		.reg_dat_we  (midiuart_reg_dat_sel ? mem_wstrb[0] : 1'b 0),
+		.reg_dat_di  (mem_wdata),
+		.reg_dat_wait(midiuart_reg_dat_wait),
+	);
+
    
         wire dsd, dsd2;
         assign audio_l = {dsd, 3'b0};
@@ -382,7 +401,8 @@ module picosoc_regs (
 	assign rdata2 = regs[raddr2[4:0]];
 endmodule
 
-// 85 MHz system memory clock
+// 80 MHz system memory clock
+// # ecppll -i 25 -o 80 --s1 40 -f /dev/stdout
 module pll(input clki, 
     output clks1,
     output locked,
@@ -424,7 +444,7 @@ EHXPLLL #(
         .PLLWAKESYNC(1'b0),
         .ENCLKOP(1'b0),
         .LOCK(locked)
-	);
+    );
 assign clko = clkop;
 endmodule
 
@@ -458,6 +478,9 @@ module ulx3s(
     // analog audio
     output [3:0] audio_l,
     output [3:0] audio_r,
+
+    // spdif / midi audio
+    output [3:0] audio_v,
 
     // not-HDMI
     output [3:0] gpdi_dp, gpdi_dn,
@@ -502,6 +525,7 @@ attosoc soc(
     
     .audio_l(audio_l),
     .audio_r(audio_r),
+    .audio_v(audio_v),
     
     .gpdi_dp(gpdi_dp),
     .gpdi_dn(gpdi_dn),
