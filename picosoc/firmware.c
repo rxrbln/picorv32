@@ -40,6 +40,14 @@ extern "C" {
 
 #include "Endianess.hh"
 
+#if 1
+#define RDCYCLE(x) asm volatile ("rdcycle %0" : "=r"(x));
+#define RDINSTR(x) asm volatile ("rdinstret %0" : "=r"(x));
+#else
+#define RDCYCLE(x) asm volatile ("csrrs %0, 0xb00, zero" : "=r"(x));
+#define RDINSTR(x) asm volatile ("csrrs %0, 0xb02, zero" : "=r"(x));
+#endif
+
 using Exact::EndianessConverter;
 using Exact::LittleEndianTraits;
 using Exact::BigEndianTraits;
@@ -282,6 +290,8 @@ uint32_t __bswapsi2 (uint32_t x) {
 
 #ifndef __riscv_muldiv
 
+extern "C" {
+
 struct DWstruct {
 	int low, high;
 };
@@ -337,7 +347,7 @@ unsigned __udivsi3(unsigned dividend, unsigned divisor)
   }
   return Q;
 }
-//unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3")));
+unsigned __divsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__udivsi3")));
 
 
 unsigned __umodsi3(unsigned dividend, unsigned divisor)
@@ -361,7 +371,7 @@ unsigned __umodsi3(unsigned dividend, unsigned divisor)
   }
   return R;
 }
-//unsigned __modsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umodsi3")));
+unsigned __modsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umodsi3")));
 
 unsigned __umulsi3(unsigned a, unsigned b)
 {
@@ -374,7 +384,9 @@ unsigned __umulsi3(unsigned a, unsigned b)
   }
   return res;
 }
-//unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
+unsigned __mulsi3(unsigned, unsigned) __attribute__ ((weak, alias ("__umulsi3")));
+
+} // extern "C"
 
 #endif
 
@@ -397,15 +409,15 @@ char getchar_prompt(const char *prompt)
 {
 	int32_t c = -1;
 	uint32_t cycles_begin, cycles_now, cycles;
-	__asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
-
+	RDCYCLE(cycles_begin);
+	
 	reg_leds = ~0;
-
+	
 	if (prompt)
 		print(prompt);
 
 	while (c == -1) {
-		__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+	        RDCYCLE(cycles_now);
 		cycles = cycles_now - cycles_begin;
 		if (cycles > SYSCLK / 2) {
 			if (prompt)
@@ -663,8 +675,8 @@ uint32_t cmd_benchmark(bool verbose, uint32_t *instns_p)
 
 	uint32_t cycles_begin, cycles_end;
 	uint32_t instns_begin, instns_end;
-	__asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
-	__asm__ volatile ("rdinstret %0" : "=r"(instns_begin));
+	RDCYCLE(cycles_begin);
+	RDINSTR(instns_begin);
 
 	for (int i = 0; i < 20; i++)
 	{
@@ -688,8 +700,9 @@ uint32_t cmd_benchmark(bool verbose, uint32_t *instns_p)
 		}
 	}
 
-	__asm__ volatile ("rdcycle %0" : "=r"(cycles_end));
-	__asm__ volatile ("rdinstret %0" : "=r"(instns_end));
+	RDCYCLE(cycles_end);
+	RDINSTR(instns_end);
+
 
 	if (verbose)
 	{
@@ -982,11 +995,11 @@ void cmd_dac(uint8_t alt)
       wait = SYSCLK / 44100 * wait;
       uint32_t cycles_now;
       do {
-	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+	RDCYCLE(cycles_now);
       } while (cycles_now - cycles_begin < wait);
     }
     // update after reach command to help compensate expensive div delay?
-    __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
+    RDCYCLE(cycles_begin);
   }
   
  return_silence:
@@ -1129,7 +1142,7 @@ void cmd_midi()
   }
   
   uint32_t cycles_begin;
-  __asm__ volatile ("rdcycle %0" : "=r"(cycles_begin));
+  RDCYCLE(cycles_begin);
   
   const bool verbose = false;
   int len = 1; // determine len from event
@@ -1183,7 +1196,7 @@ void cmd_midi()
 
       uint32_t cycles_now;
       do {
-	__asm__ volatile ("rdcycle %0" : "=r"(cycles_now));
+	RDCYCLE(cycles_now);
       } while (cycles_now - cycles_begin < wait);
       cycles_begin = cycles_now; // next reference
     } else if (tdelta < -1) {
@@ -2047,12 +2060,14 @@ void life_set_array(uint8_t* state, pair* array, int n) {
   }
 }
 
+__attribute__ ((__always_inline__))
 uint8_t life_at(uint8_t* state, int x, int y) {
   if (x < 0 || y < 0 || x >= life_w || y >= life_h)
     return 0;
   return state[y * life_w + x] ? 1 : 0;
 }
 
+__attribute__ ((__always_inline__))
 void life_draw(uint8_t* state) {
   uint8_t c = 1;
   for (int y = 0; y < life_h; ++y) {
@@ -2118,6 +2133,7 @@ void life_seed(uint8_t* state) {
 #endif
 }
 
+__attribute__ ((__always_inline__))
 void life_evolve(uint8_t* state, uint8_t* state2) {
   for (int y = 0; y < life_h; ++y) {
     for (int x = 0; x < life_w; ++x) {
@@ -2138,21 +2154,38 @@ void life_evolve(uint8_t* state, uint8_t* state2) {
   }
 }
 
-void life() {
+//uint8_t state[life_w * life_h * 2];
+
+void life_init() {
   uint8_t* state = (uint8_t*)sdram;
   uint8_t* state2 = state + life_w * life_h;
-  
+
   life_seed(state);
+}
+
+__attribute__((noinline, section(".fastcode")))
+void life_run(int bench) {
+  uint8_t* state = (uint8_t*)sdram;
+  uint8_t* state2 = state + life_w * life_h;
+
+  uint32_t cycles_begin, cycles_end;
+  uint32_t instns_begin, instns_end;
+  RDCYCLE(cycles_begin);
+  RDINSTR(instns_begin);
+
   life_draw(state);
-  //getchar();
-  
-  for (int i = 0; i < 666667; ++i) {
+  for (int i = 0; i < (bench ? 32 : 666667); ++i) {
     life_evolve(state, state2);
     life_draw(state2);
     life_evolve(state2, state);
     life_draw(state);
     if (reg_uart_data != -1)
       break;
+  }
+
+  if (bench) {
+    printf("Cycles: 0x%x\n", cycles_end - cycles_begin);
+    printf("Instns: 0x%x\n", instns_end - instns_begin);
   }
 }
 
@@ -2289,7 +2322,9 @@ void main()
 			        scroll ^= 2; // or 1
 				break;
 			case 'l':
-			        life();
+			case 'L':
+			        life_init();
+				life_run(cmd == 'L');
 			        break;
 			case 'g':
 			case 'G':
@@ -2327,7 +2362,7 @@ void main()
 				  vga_mmio[0] = cursor * 4;
 				  vga_mmio[1] = cursor * 4;
 				  uint32_t cycles;
-				  __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				  RDCYCLE(cycles);
 				  vga_mmio[2] = cycles;
 				  vga_mmio[3] = ~cycles;
 #else
@@ -2336,10 +2371,10 @@ void main()
 					  vga_vram[0], vga_vram[1], vga_vram[2], vga_vram[4]);
 				  } else {
 				    uint32_t cycles;
-				    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				    RDCYCLE(cycles_now);
 				    vga_vram[0] = cycles;
 				    vga_vram[1] = cycles >> 16;
-				    __asm__ volatile ("rdcycle %0" : "=r"(cycles));
+				    RDCYCLE(cycles);
 				    vga_vram[2] = cycles;
 				    vga_vram[3] = cycles >> 16;
 				  }

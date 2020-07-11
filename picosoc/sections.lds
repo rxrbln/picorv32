@@ -10,7 +10,7 @@
 
 MEMORY {
 #ifdef ULX3S
-    FLASH (rx)      : ORIGIN = 0x00400000, LENGTH = 0xC00000 /* entire flash, 12 MiB */
+    FLASH (rx)      : ORIGIN = 0x00300000, LENGTH = 0xD00000 /* entire flash, 13 MiB */
 #else
     FLASH (rx)      : ORIGIN = 0x00100000, LENGTH = 0xE00000 /* entire flash, 14 MiB */
 #endif
@@ -46,8 +46,9 @@ SECTIONS {
         . = ALIGN(4);
         *(.data)           /* .data sections */
         *(.data*)          /* .data* sections */
-        *(.sdata)           /* .sdata sections */
-        *(.sdata*)          /* .sdata* sections */
+        *(.sdata)          /* .sdata sections */
+        *(.sdata*)         /* .sdata* sections */
+        *(.fastcode*)      /* fast cached code to be copied to SRAM */
         . = ALIGN(4);
         _edata = .;        /* define a global symbol at data end; used by startup code in order to initialise the .data section in RAM */
     } >RAM
