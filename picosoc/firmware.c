@@ -85,6 +85,7 @@ extern uint32_t sram;
 #define reg_fm16 ((volatile uint16_t*)0x40000010)
 
 static uint16_t* vga_vram = (uint16_t*)0x80000000;
+static uint32_t* vga_vram32 = (uint32_t*)0x80000000;
 static uint16_t* vga_font = (uint16_t*)0x80002000;
 
 static uint32_t* sdram = (uint32_t*)0x20000000;
@@ -225,20 +226,21 @@ void do_scroll() {
     if (!scroll) {
       vgay = 0; // simply wrap
     } else {
-      // scroll
+      // scroll, only visible area, 32-bit (2 char + attr) at a time
       for (vgay = 0; vgay < 30 - scroll; ++vgay)
-	for (int x = 0; x < 80; ++x)
-	  vga_vram[vgay * 128 + x] = vga_vram[(vgay + scroll) * 128 + x];
-      // clear lines after curret, only for scroll > 1
+	for (int x = 0; x < 80/2; ++x)
+	  vga_vram32[vgay * 128/2 + x] = vga_vram32[(vgay + scroll) * 128/2 + x];
+      
+      // clear lines after current, only for scroll > 1
       for (int y = vgay + 1; y < 30; ++y)
-	for (int x = 0; x < 80; ++x)
-	  vga_vram[y * 128 + x] = 0;
+	for (int x = 0; x < 80/2; ++x)
+	  vga_vram32[y * 128/2 + x] = 0;
     }
   }
   
   // clear last, new line
-  for (int x = 0; x < 80; ++x)
-    vga_vram[vgay * 128 + x] = 0;
+  for (int x = 0; x < 80/2; ++x)
+    vga_vram32[vgay * 128/2 + x] = 0;
 }
 
 void putchar(char c)
@@ -2071,10 +2073,11 @@ __attribute__ ((__always_inline__))
 void life_draw(uint8_t* state) {
   uint8_t c = 1;
   for (int y = 0; y < life_h; ++y) {
-    for (int x = 0; x < life_w*2; x += 2, ++state) {
+    for (int x = 0; x < life_w; ++x, ++state) {
       // double text char as square pixels
-      vga_vram[y*128 + x] = vga_vram[y*128 + x + 1] =
-	*state > 0 ? (c++ << 12) : 0;
+      uint16_t v = *state > 0 ? (c++ << 12) : 0;
+      // 32-bit at a time for performance
+      vga_vram32[y*128/2 + x] = (v << 16) | v;
       if (c > 7) c = 1;
     }
   }
