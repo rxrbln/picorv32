@@ -423,41 +423,39 @@ module vga(
 	    readready <= 0;
 	 end else begin
 	    if (!addr[23]) begin // VRAM, not CTRL registers
-	       if (addr[17]) begin
+	       if (addr[16]) begin
 		  // 2nd "bank" FONT
 		  // MUX read access
 		  if (iswrite) begin // we can always write
-		     fontwen <= iswrite;
-		     fontwaddr <= addr[13:2];
+		     fontwaddr <= addr[12:2];
 		     fontwstrb <= wstrb;
 		     fontwdata <= wdata;
+		     fontwen <= iswrite;
 		     vga_ready <= 1;
 		  end else if (isread && xpos[2:0] == 0) begin
-		     fontren <= 1;
 		     fontraddr <= addr[12:2];
+		     fontren <= 1;
 		  end else if (isread && fontren && xpos[2:0] == 2) begin
-		     fontren <= 0;
 		     vga_rdata[31:0] <= fontrdata[31:0];
+		     fontren <= 0;
 		     readready <= 1;
-		     //vga_ready <= !iswrite; // micro optimization
 		  end else if (isread && readready)
 		    vga_ready <= 1;
 	       end else begin // 1st "bank" VRAM
 		  // MUX read access
 		  if (iswrite) begin // we can always write
-		     vramwen <= iswrite;
-		     vramwaddr <= addr[16:2];
+		     vramwaddr <= addr[15:2];
 		     vramwstrb <= wstrb;
 		     vramwdata <= wdata;
+		     vramwen <= iswrite;
 		     vga_ready <= 1;
 		  end else if (isread && xpos[1:0] == 0) begin
+		     vramraddr <= addr[15:2];
 		     vramren <= 1;
-		     vramraddr <= addr[16:2];
 		  end else if (isread && vramren && xpos[1:0] == 2) begin
-		     vramren <= 0;
 		     vga_rdata[31:0] <= vramrdata[31:0];
+		     vramren <= 0;
 		     readready <= 1;
-		     //vga_ready <= !iswrite; // micro optimization
 		  end else if (isread && readready)
 		    vga_ready <= 1;
 	       end
