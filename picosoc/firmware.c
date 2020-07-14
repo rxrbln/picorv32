@@ -27,6 +27,8 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
+#include "utility/C.h" // ARRAY_SIZE
+
 typedef long size_t;
 extern "C" {
 #include "libc/strlen.c"
@@ -79,6 +81,8 @@ extern uint32_t sram;
 
 #define reg_leds (*(volatile uint32_t*)0x03000000)
 #define reg_uart_midi (*(volatile uint8_t*)0x03000010)
+
+#define reg_ps2 (*(volatile uint32_t*)0x03000020)
 
 #define reg_dac ((volatile uint32_t*)0x40000000)
 #define reg_fm ((volatile uint32_t*)0x40000010)
@@ -407,31 +411,82 @@ int printf(const char* format, ...)
   return ret;
 }
 
+const uint8_t ps2_set2[] = {
+// 0    1    2    3    4    5    6    7    8    9    a    b    c    d    e    f
+   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,'\t', '~',   0, //  0
+   0,   0,   0,   0,   0, 'q', '1',   0,   0,   0, 'z', 's', 'a', 'w', '2',   0, // 10
+   0, 'c', 'x', 'd', 'e', '4', '3',   0,   0, ' ', 'v', 'f', 't', 'r', '5',   0, // 20
+ 'n', 'n', 'b', 'h', 'g', 'y', '6',   0,   0,   0, 'm', 'j', 'u', '7', '8',   0, // 30
+   0, '<', 'k', 'i', 'o', '0', '9',   0,   0, '>', '?', 'l', ':', 'p', '-',   0, // 40
+   0,   0, '"',   0, '[', '+',   0,   0,   0,   0,'\r', ']',   0, '|',   0,   0, // 50
+   0,   0,   0,   0,   0,   0,'\b',   0,   0,   0,   0,   0,   0,   0,   0,   0, // 60
+   0,   0,   0,   0,   0,   0,'\e',   0,   0,   0,   0,   0,   0,   0,   0,   0, // 70
+};
+
+uint8_t ps2_release = false;
+uint8_t ps2_ext = false;
+uint8_t ps2_mod_shift = false;
+uint8_t ps2_mod_ctrl = false;
+uint8_t ps2_mod_alt = false;
+
 char getchar_prompt(const char *prompt)
 {
-	int32_t c = -1;
-	uint32_t cycles_begin, cycles_now, cycles;
-	RDCYCLE(cycles_begin);
-	
-	reg_leds = ~0;
-	
-	if (prompt)
-		print(prompt);
+  int32_t c = -1;
+  uint32_t cycles_begin, cycles_now, cycles;
+  RDCYCLE(cycles_begin);
+  
+  reg_leds = ~0;
+  
+  if (prompt)
+    print(prompt);
 
-	while (c == -1) {
-	        RDCYCLE(cycles_now);
-		cycles = cycles_now - cycles_begin;
-		if (cycles > SYSCLK / 2) {
-			if (prompt)
-				print(prompt);
-			cycles_begin = cycles_now;
-			reg_leds = ~reg_leds;
-		}
-		c = reg_uart_data;
+  while (c == -1) {
+    RDCYCLE(cycles_now);
+    cycles = cycles_now - cycles_begin;
+    if (cycles > SYSCLK / 2) {
+      if (prompt)
+	print(prompt);
+      cycles_begin = cycles_now;
+      reg_leds = ~reg_leds;
+    }
+    
+    // serial
+    c = reg_uart_data;
+    
+    // ps2
+    if (c == -1) {
+      c = reg_ps2;
+      if (c != -1) {
+	//printf("%02x %d%d%d\n", c, ps2_mod_shift, ps2_mod_ctrl, ps2_mod_alt);
+	switch (c) {
+	case 0xf0: ps2_release = true; c = -1; break;
+	case 0xe0: ps2_ext = true; c = -1; break;
+	default:
+	  if (ps2_ext)
+	    c |= 0xe000;
+	  
+	  if (c == 0x11 || c == 0xe011) ps2_mod_alt = !ps2_release;
+	  if (c == 0x12 || c == 0x59) ps2_mod_shift = !ps2_release;
+	  if (c == 0x14 || c == 0xe014) ps2_mod_ctrl = !ps2_release;
+	  
+	  // so we got scancodes, map to ASCII
+	  c = (c > 0 && c < ARRAY_SIZE(ps2_set2)) ?
+	    ps2_set2[c] : -1;
+
+	  if (ps2_mod_shift)
+	    c = toupper(c);
+	  
+	  if (ps2_release)
+	    c = -1; // ignore release for now
+	  
+	  ps2_release = ps2_ext = false;
 	}
-
-	reg_leds = 0;
-	return c;
+      }
+    }
+  }
+  
+  reg_leds = 0;
+  return c;
 }
 
 char getchar()

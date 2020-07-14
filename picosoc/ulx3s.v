@@ -34,6 +34,9 @@ module attosoc (
 	output [3:0] audio_v,
 	output [3:0] gpdi_dp, gpdi_dn,
 
+	input ps2_clk,
+	input ps2_data,
+
 	// SPI flash
 	input flash_sck,
 	output flash_csn,
@@ -250,6 +253,9 @@ module attosoc (
    	wire        midiuart_reg_dat_sel = mem_valid && (mem_addr == 32'h 0300_0010);
 	wire midiuart_reg_dat_wait;
 
+      	wire        ps2_reg_dat_sel = mem_valid && (mem_addr == 32'h 0300_0020);
+	wire [31:0] ps2_reg_dat_do;
+
    
         always @(posedge clk) begin
 	   iomem_ready <= 1'b0;
@@ -274,6 +280,7 @@ module attosoc (
 			   spimem_ready || spimemio_cfgreg_sel ||
 			   simpleuart_reg_div_sel ||
 			   (simpleuart_reg_dat_sel && !simpleuart_reg_dat_wait) ||
+			   ps2_reg_dat_sel ||
 			   (midiuart_reg_dat_sel && !midiuart_reg_dat_wait) ||
 			   debug_ready ||
 			   spimmc_ready ||
@@ -282,6 +289,7 @@ module attosoc (
 	assign mem_rdata = (iomem_valid && iomem_ready) ? iomem_rdata :
 			   simpleuart_reg_div_sel ? simpleuart_reg_div_do :
 			   simpleuart_reg_dat_sel ? simpleuart_reg_dat_do :
+			   ps2_reg_dat_sel ? ps2_reg_dat_do :
 			   debug_ready ? debug_rdata :
 			   spimem_ready ? spimem_rdata :
 			   spimemio_cfgreg_sel ? spimemio_cfgreg_do :
@@ -364,6 +372,16 @@ module attosoc (
 		.reg_dat_wait(midiuart_reg_dat_wait),
 	);
 
+      	ps2 ps2 (
+		.clk         (clk         ),
+		.resetn      (resetn      ),
+
+		.ps2_clk     (ps2_clk     ),
+		.ps2_data    (ps2_data    ),
+
+		.reg_dat_re  (ps2_reg_dat_sel && !mem_wstrb),
+		.reg_dat_do  (ps2_reg_dat_do),
+	);
    
         wire dsd, dsd2;
         assign audio_l = {dsd, 3'b0};
@@ -506,6 +524,10 @@ module ulx3s(
     // spdif / midi audio
     output [3:0] audio_v,
 
+    // ps2 i/o
+    output usb_fpga_pu_dp, usb_fpga_pu_dn,
+    input  usb_fpga_bd_dp, usb_fpga_bd_dn,
+
     // not-HDMI
     output [3:0] gpdi_dp, gpdi_dn,
 
@@ -538,6 +560,10 @@ module ulx3s(
    wire tristate = 1'b0;
    USRMCLK u1 (.USRMCLKI(flash_sck), .USRMCLKTS(tristate));
 
+   // enable ps2 pull ups on both D+ and D-
+   assign usb_fpga_pu_dp = 1'b1;
+   assign usb_fpga_pu_dn = 1'b1;
+   
 attosoc soc(
     .clk(clk),
     .clk_mem(sysclk),
@@ -550,6 +576,9 @@ attosoc soc(
     .audio_l(audio_l),
     .audio_r(audio_r),
     .audio_v(audio_v),
+
+    .ps2_clk(usb_fpga_bd_dp),
+    .ps2_data(usb_fpga_bd_dn),
     
     .gpdi_dp(gpdi_dp),
     .gpdi_dn(gpdi_dn),
