@@ -31,6 +31,9 @@
 
 typedef long size_t;
 extern "C" {
+  
+__attribute__((section(".fastcode"))) void* memset(void*, int, size_t);
+
 #include "libc/strlen.c"
 #include "libc/strncmp.c"
 #include "libc/strncasecmp.c"
@@ -429,6 +432,44 @@ uint8_t ps2_mod_shift = false;
 uint8_t ps2_mod_ctrl = false;
 uint8_t ps2_mod_alt = false;
 
+int getone() {
+  // serial
+  int c = reg_uart_data;
+  
+  // ps2
+  if (c == -1) {
+    c = reg_ps2;
+    if (c != -1) {
+      //printf("%02x %d%d%d\n", c, ps2_mod_shift, ps2_mod_ctrl, ps2_mod_alt);
+      switch (c) {
+      case 0xf0: ps2_release = true; c = -1; break;
+      case 0xe0: ps2_ext = true; c = -1; break;
+      default:
+	if (ps2_ext)
+	  c |= 0xe000;
+	
+	if (c == 0x11 || c == 0xe011) ps2_mod_alt = !ps2_release;
+	if (c == 0x12 || c == 0x59) ps2_mod_shift = !ps2_release;
+	if (c == 0x14 || c == 0xe014) ps2_mod_ctrl = !ps2_release;
+	
+	// so we got scancodes, map to ASCII
+	c = (c > 0 && c < ARRAY_SIZE(ps2_set2)) ?
+	  ps2_set2[c] : -1;
+	
+	if (ps2_mod_shift)
+	  c = toupper(c);
+	
+	if (ps2_release)
+	  c = -1; // ignore release for now
+	
+	ps2_release = ps2_ext = false;
+      }
+    }
+  }
+  
+  return c;
+}
+
 char getchar_prompt(const char *prompt)
 {
   int32_t c = -1;
@@ -450,39 +491,7 @@ char getchar_prompt(const char *prompt)
       reg_leds = ~reg_leds;
     }
     
-    // serial
-    c = reg_uart_data;
-    
-    // ps2
-    if (c == -1) {
-      c = reg_ps2;
-      if (c != -1) {
-	//printf("%02x %d%d%d\n", c, ps2_mod_shift, ps2_mod_ctrl, ps2_mod_alt);
-	switch (c) {
-	case 0xf0: ps2_release = true; c = -1; break;
-	case 0xe0: ps2_ext = true; c = -1; break;
-	default:
-	  if (ps2_ext)
-	    c |= 0xe000;
-	  
-	  if (c == 0x11 || c == 0xe011) ps2_mod_alt = !ps2_release;
-	  if (c == 0x12 || c == 0x59) ps2_mod_shift = !ps2_release;
-	  if (c == 0x14 || c == 0xe014) ps2_mod_ctrl = !ps2_release;
-	  
-	  // so we got scancodes, map to ASCII
-	  c = (c > 0 && c < ARRAY_SIZE(ps2_set2)) ?
-	    ps2_set2[c] : -1;
-
-	  if (ps2_mod_shift)
-	    c = toupper(c);
-	  
-	  if (ps2_release)
-	    c = -1; // ignore release for now
-	  
-	  ps2_release = ps2_ext = false;
-	}
-      }
-    }
+    c = getone();
   }
   
   reg_leds = 0;
@@ -1248,7 +1257,7 @@ void cmd_midi()
       }
 
       // key to exit
-      if (reg_uart_data != -1)
+      if (getone() != -1)
 	break;
 
       uint32_t cycles_now;
@@ -1426,7 +1435,6 @@ void cmd_read_ram()
 
   printf("\n");
 }
-
 
 void cmd_analyze()
 {
@@ -2266,7 +2274,7 @@ void life_run(int bench) {
     life_draw(state2);
     life_evolve(state2, state);
     life_draw(state);
-    if (reg_uart_data != -1)
+    if (getone() != -1)
       break;
   }
 
