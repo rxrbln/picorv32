@@ -438,58 +438,52 @@ module picosoc_regs (
 	assign rdata2 = regs[raddr2[4:0]];
 endmodule
 
-// 83 MHz system memory clock, 41.667 MHz SoC
-// # ecppll -i 25 -o 83 --clkout1 41.3
-module pll
-(
-    input clkin, // 25 MHz, 0 deg
-    output clkout0, // 83.3333 MHz, 0 deg
-    output clkout1, // 41.6667 MHz, 0 deg
-    output locked
+// 80 MHz system memory clock
+// # ecppll -i 25 -o 80 --s1 40 -f /dev/stdout
+module pll(input clki,
+    output clks1,
+    output locked,
+    output clko
 );
-(* FREQUENCY_PIN_CLKI="25" *)
-(* FREQUENCY_PIN_CLKOP="83.3333" *)
-(* FREQUENCY_PIN_CLKOS="41.6667" *)
+wire clkfb;
+wire clkos;
+wire clkop;
 (* ICP_CURRENT="12" *) (* LPF_RESISTOR="8" *) (* MFG_ENABLE_FILTEROPAMP="1" *) (* MFG_GMCREF_SEL="2" *)
 EHXPLLL #(
         .PLLRST_ENA("DISABLED"),
         .INTFB_WAKE("DISABLED"),
         .STDBY_ENABLE("DISABLED"),
         .DPHASE_SOURCE("DISABLED"),
+        .CLKOP_FPHASE(0),
+        .CLKOP_CPHASE(3),
         .OUTDIVIDER_MUXA("DIVA"),
-        .OUTDIVIDER_MUXB("DIVB"),
-        .OUTDIVIDER_MUXC("DIVC"),
-        .OUTDIVIDER_MUXD("DIVD"),
-        .CLKI_DIV(3),
         .CLKOP_ENABLE("ENABLED"),
         .CLKOP_DIV(7),
-        .CLKOP_CPHASE(3),
-        .CLKOP_FPHASE(0),
         .CLKOS_ENABLE("ENABLED"),
         .CLKOS_DIV(14),
         .CLKOS_CPHASE(3),
         .CLKOS_FPHASE(0),
-        .FEEDBK_PATH("CLKOP"),
-        .CLKFB_DIV(10)
+        .CLKFB_DIV(10),
+        .CLKI_DIV(3),
+        .FEEDBK_PATH("INT_OP")
     ) pll_i (
+        .CLKI(clki),
+        .CLKFB(clkfb),
+        .CLKINTFB(clkfb),
+        .CLKOP(clkop),
+        .CLKOS(clks1),
         .RST(1'b0),
         .STDBY(1'b0),
-        .CLKI(clkin),
-        .CLKOP(clkout0),
-        .CLKOS(clkout1),
-        .CLKFB(clkout0),
-        .CLKINTFB(),
         .PHASESEL0(1'b0),
         .PHASESEL1(1'b0),
-        .PHASEDIR(1'b1),
-        .PHASESTEP(1'b1),
-        .PHASELOADREG(1'b1),
+        .PHASEDIR(1'b0),
+        .PHASESTEP(1'b0),
         .PLLWAKESYNC(1'b0),
         .ENCLKOP(1'b0),
         .LOCK(locked)
-	);
+    );
+assign clko = clkop;
 endmodule
-
 
 module ulx3s(
     input clk_25mhz,
@@ -550,9 +544,9 @@ module ulx3s(
    wire clk; // usually half CPU clock
    
    pll pll(
-    .clkin(clk_25mhz),
-    .clkout0(sysclk),
-    .clkout1(clk),
+    .clki(clk_25mhz),
+    .clko(sysclk),
+    .clks1(clk),
    );
    
    // flash SPI clock
