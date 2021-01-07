@@ -20,7 +20,7 @@
 
 // based on work by Paul Ruiz and Grant Searle
 
-module ps2 #(parameter integer DEFAULT_DIV = 1) (
+module ps2 (
 	input clk,
 	input resetn,
 
