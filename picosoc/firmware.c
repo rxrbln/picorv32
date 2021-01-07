@@ -2070,6 +2070,35 @@ void cmd_read_sd() {
   *spimmcOOB = 0xff; // OOB de-assert CS
 }
 
+int readfile(const char* filename, void* buf, size_t count)
+{
+  int fd = open(filename);
+  if (fd <= 0) return fd;
+  
+  printf("readfile: %d\n", filename);
+  int ret = read(fd, buf, count);
+  
+  close(fd);
+  
+  return ret;
+}
+
+void cmd_run()
+{
+  int ret = readfile("user.exe", sdram, 0x20000);
+  if (ret <= 0) {
+    printf("no user.exe\n");
+    return;
+  }
+  
+  printf("read: %d\n", ret);
+  
+  int (*entry)(int argc, char** argv) = (int (*)(int argc, char** argv))sdram;
+  ret = entry(0, 0);
+  printf("user.exe ret: %x\n", ret);
+}
+
+
 // --------------------------------------------------------
 
 const uint8_t charset[] = {
@@ -2368,6 +2397,9 @@ void main()
 				break;
 			case 'r':
 			        cmd_read_ram();
+				break;
+			case 'R':
+			        cmd_run();
 				break;
 			case 's':
 			        cmd_read_sd();
