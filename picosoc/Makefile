@@ -1,6 +1,7 @@
 
 CROSS=riscv32-unknown-elf-
-CFLAGS=-fno-exceptions -fno-rtti -Os -mabi=ilp32
+CFLAGS=-fno-exceptions -fno-rtti -Os -mabi=ilp32 -march=rv32imc
+# clang++ $(CFLAGS) -target riscv32-unknown-elf -fuse-ld=lld
 
 ADDV=video_timing.v vga.v audio.v
 HDMI2=tmds_encoder.v fake_differential.v  vga2dvid.v clk_25_250_125_25.v
@@ -43,7 +44,7 @@ hx8kdemo_sections.lds: sections.lds
 	$(CROSS)cpp -P -DHX8KDEMO -o $@ $^
 
 hx8kdemo_fw.elf: hx8kdemo_sections.lds start.S firmware.c
-	$(CROSS)gcc $(CFLAGS) -DHX8KDEMO -march=rv32imc -Wl,-Bstatic,-T,hx8kdemo_sections.lds,--strip-debug -ffreestanding -nostdlib -o hx8kdemo_fw.elf start.S firmware.c
+	$(CROSS)gcc $(CFLAGS) -DHX8KDEMO -Wl,-Bstatic,-T,hx8kdemo_sections.lds,--strip-debug -ffreestanding -nostdlib -o hx8kdemo_fw.elf start.S firmware.c
 
 hx8kdemo_fw.hex: hx8kdemo_fw.elf
 	$(CROSS)objcopy -O verilog hx8kdemo_fw.elf hx8kdemo_fw.hex
@@ -89,7 +90,7 @@ icebreaker_sections.lds: sections.lds
 	$(CROSS)cpp -P -DICEBREAKER -o $@ $^
 
 icebreaker_fw.elf: icebreaker_sections.lds start.S firmware.c
-	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -march=rv32i -Wl,-Bstatic,-T,icebreaker_sections.lds,--strip-debug -ffreestanding -nostdlib -o icebreaker_fw.elf start.S firmware.c
+	$(CROSS)gcc $(CFLAGS) -DICEBREAKER -Wl,-Bstatic,-T,icebreaker_sections.lds,--strip-debug -ffreestanding -nostdlib -o icebreaker_fw.elf start.S firmware.c
 
 icebreaker_fw.hex: icebreaker_fw.elf
 	$(CROSS)objcopy -O verilog icebreaker_fw.elf icebreaker_fw.hex
@@ -105,8 +106,8 @@ ulx3sim: ulx3s_tb.vvp ulx3s_fw.hex
 ulx3synsim: ulx3s_syn_tb.vvp ulx3s_fw.hex
 	vvp -N $< +firmware=ulx3s_fw.hex
 
-ulx3s.json: ulx3s.v sdram.v spimemio.v spimmc.v simpleuart.v $(ADDV) ../picorv32.v # picosoc.v
-	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json -abc2' ulx3s.v sdram.v spimemio.v spimmc.v simpleuart.v \
+ulx3s.json: ulx3s.v sdram.v ps2.v spimemio.v spimmc.v simpleuart.v $(ADDV) ../picorv32.v # picosoc.v
+	yosys -ql ulx3s.log -p 'synth_ecp5 -top ulx3s -json ulx3s.json -abc2' ulx3s.v sdram.v ps2.v spimemio.v spimmc.v simpleuart.v \
 	$(HDMI2) $(ADDV) ../picorv32.v # $^
 
 ulx3s_tb.vvp: ulx3s_tb.v ulx3s.v ulx3s_spram.v spimemio.v simpleuart.v $(ADDV) picosoc.v ../picorv32.v spiflash.v
@@ -119,30 +120,33 @@ ulx3s_syn.v: ulx3s.json ulx3s_fw.hex
 	yosys -p 'read_json ulx3s.json; write_verilog ulx3s_syn.v'
 
 ulx3s.cfg: ulx3s.lpf ulx3s.json
-	nextpnr-ecp5 --freq 45 --placer heap --85k --textcfg ulx3s.cfg --lpf ulx3s.lpf --json ulx3s.json
+	nextpnr-ecp5 --freq 50 --placer heap --85k --textcfg ulx3s.cfg --lpf ulx3s.lpf --json ulx3s.json
 
 ulx3s.bit: ulx3s.cfg
 	#ecptime -d up5k -c 13 -mtr ulx3s.rpt ulx3s.cfg
 	ecppack ulx3s.cfg --bit ulx3s.bit
 
-ulx3sprog: ulx3s.bit ulx3s_fw.img
-	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x400000 ulx3s_fw.img
+ulx3sprog: ulx3s.bit ulx3s_fw.img ulx3s_usr.exe
+	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x300000 ulx3s_fw.img
 	/usr/src/f32c-ujprog/ujprog/ujprog -t ulx3s.bit # -j FLASH 
 
 ulx3sprog_fw: ulx3s_fw.bin
-	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x200000 ulx3s_fw.img
+	/usr/src/f32c-ujprog/ujprog/ujprog -j FLASH -f 0x300000 ulx3s_fw.img
 
 ulx3s_sections.lds: sections.lds
 	$(CROSS)cpp -P -DULX3S -o $@ $^
 
 ulx3s_fw.elf: ulx3s_sections.lds start.S firmware.c
-	$(CROSS)g++ $(CFLAGS) -I utility -DULX3S -march=rv32im -Wl,-Bstatic,-T,ulx3s_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_fw.elf start.S firmware.c
+	$(CROSS)g++ $(CFLAGS) -I utility -DULX3S -Wl,-Bstatic,-T,ulx3s_sections.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_fw.elf start.S firmware.c
 
-ulx3s_fw.hex: ulx3s_fw.elf
-	$(CROSS)objcopy -O verilog ulx3s_fw.elf /dev/stdout | fold -w 12 | sed '/@/d; s/\(..\) \(..\) \(..\) \(..\)/\4\3\2\1/' > ulx3s_fw.hex
+ulx3s_usr.elf: sections-user.lds user.c
+	$(CROSS)g++ $(CFLAGS) -s -I utility -DULX3S -Wl,-Bstatic,-T,sections-user.lds,--strip-debug -ffreestanding -nostdlib -o ulx3s_usr.elf user.c
 
 ulx3s_fw.img: ulx3s_fw.elf
 	$(CROSS)objcopy -O binary ulx3s_fw.elf ulx3s_fw.img
+
+ulx3s_usr.exe: ulx3s_usr.elf
+	$(CROSS)objcopy -O binary ulx3s_usr.elf ulx3s_usr.exe
 
 # ---- Testbench for SPI Flash Model ----
 
